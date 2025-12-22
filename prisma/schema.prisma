@@ -8,24 +8,58 @@ datasource db {
 }
 
 model User {
+  id            Int            @id @default(autoincrement())
+  email         String         @unique
+  username      String         @unique
+  password      String
+  createdAt     DateTime       @default(now()) @map("created_at")
+
+  gamesAsBlack  Game[]         @relation("BlackPlayer")
+  gamesAsWhite  Game[]         @relation("WhitePlayer")
+  refreshTokens RefreshToken[]
+
+  @@map("users")
+}
+
+model RefreshToken {
   id        Int      @id @default(autoincrement())
-  email     String   @unique
-  username  String   @unique
-  password  String
-  createdAt DateTime @default(now())
-  
-  gamesAsWhite Game[] @relation("WhitePlayer")
-  gamesAsBlack Game[] @relation("BlackPlayer")
+  token     String   @unique
+  userId    Int      @map("user_id")
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("refresh_tokens")
+}
+
+model AiModel {
+  id           Int      @id @default(autoincrement())
+  name         String   @unique
+  config       Json
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  gamesAsBlack Game[]   @relation("BlackAi")
+  gamesAsWhite Game[]   @relation("WhiteAi")
+
+  @@map("ai_models")
 }
 
 model Game {
   id        Int      @id @default(autoincrement())
-  whiteId   Int?
-  blackId   Int?
-  pgn       String   @default("")
-  result    String?  // "1-0", "0-1", "1/2-1/2"
-  createdAt DateTime @default(now())
+  
+  whiteId   Int?     @map("white_id")
+  blackId   Int?     @map("black_id")
+  whiteAiId Int?     @map("white_ai_id")
+  blackAiId Int?     @map("black_ai_id")
 
-  white     User?    @relation("WhitePlayer", fields: [whiteId], references: [id])
+  pgn       String   @default("")
+  result    String?
+  createdAt DateTime @default(now()) @map("created_at")
+  
+  blackAi   AiModel? @relation("BlackAi", fields: [blackAiId], references: [id])
   black     User?    @relation("BlackPlayer", fields: [blackId], references: [id])
+  whiteAi   AiModel? @relation("WhiteAi", fields: [whiteAiId], references: [id])
+  white     User?    @relation("WhitePlayer", fields: [whiteId], references: [id])
+
+  @@map("games")
 }
