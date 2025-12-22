@@ -8,14 +8,32 @@ datasource db {
 }
 
 model User {
+  id            Int            @id @default(autoincrement())
+  email         String         @unique
+  username      String         @unique
+  password      String
+  createdAt     DateTime       @default(now())
+  gamesAsBlack  Game[]         @relation("BlackPlayer")
+  gamesAsWhite  Game[]         @relation("WhitePlayer")
+  refreshTokens RefreshToken[]
+}
+
+model RefreshToken {
   id        Int      @id @default(autoincrement())
-  email     String   @unique
-  username  String   @unique
-  password  String
+  token     String   @unique
+  userId    Int
+  expiresAt DateTime
   createdAt DateTime @default(now())
-  
-  gamesAsWhite Game[] @relation("WhitePlayer")
-  gamesAsBlack Game[] @relation("BlackPlayer")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model AiModel {
+  id           Int      @id @default(autoincrement())
+  name         String   @unique
+  config       Json
+  createdAt    DateTime @default(now())
+  gamesAsBlack Game[]   @relation("BlackAi")
+  gamesAsWhite Game[]   @relation("WhiteAi")
 }
 
 model Game {
@@ -23,9 +41,12 @@ model Game {
   whiteId   Int?
   blackId   Int?
   pgn       String   @default("")
-  result    String?  // "1-0", "0-1", "1/2-1/2"
+  result    String?
   createdAt DateTime @default(now())
-
-  white     User?    @relation("WhitePlayer", fields: [whiteId], references: [id])
+  blackAiId Int?
+  whiteAiId Int?
+  blackAi   AiModel? @relation("BlackAi", fields: [blackAiId], references: [id])
   black     User?    @relation("BlackPlayer", fields: [blackId], references: [id])
+  whiteAi   AiModel? @relation("WhiteAi", fields: [whiteAiId], references: [id])
+  white     User?    @relation("WhitePlayer", fields: [whiteId], references: [id])
 }
