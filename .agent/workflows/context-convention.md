@@ -33,7 +33,7 @@ description: 현재 작업의 목표, 진행 상황, 기술적 결정 사항 등
      (기존 내용...)
      ```
 4. **Save to File (파일 저장)**
-   - 작성된 전체 내용을 기능 네이밍에 따라 `*.md` 파일에 저장하세요.
+   - 작성된 전체 내용을 기능 네이밍에 따라 `/contexts-space/**/*.md` 파일에 저장하세요.
      - 경로 예시: `/contexts-space/jwt/JWT_CONTEXT.md`
      - 도구: `write_to_file` (Overwrite=true)
 5. **Final Review (완료 보고)**

@@ -32,7 +32,11 @@ export class AllExceptionsFilter implements ExceptionFilter {
       
       // message 처리
       if (resp.message) {
-          message = resp.message;
+          if (Array.isArray(resp.message)) {
+              message = resp.message.join(', ');
+          } else {
+              message = resp.message as string;
+          }
       }
       
       // error 처리 (HTTP Exception인 경우 보통 error 필드가 있음)
