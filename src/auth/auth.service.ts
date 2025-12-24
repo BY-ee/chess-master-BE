@@ -28,4 +28,13 @@ export class AuthService {
   async register(userDto: any) {
     return this.usersService.create(userDto);
   }
+
+  async getUserProfile(userId: number) {
+    const user = await this.usersService.findById(userId);
+    if (user) {
+      const { password, ...result } = user;
+      return result;
+    }
+    return null;
+  }
 }
