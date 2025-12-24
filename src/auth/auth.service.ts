@@ -1,6 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { UsersService } from '../users/users.service';
 import { JwtService } from '@nestjs/jwt';
+import { SignupDto } from './dto/signup.dto';
+import { User } from '@prisma/client';
+import * as bcrypt from 'bcrypt';
 
 @Injectable()
 export class AuthService {
@@ -9,32 +12,38 @@ export class AuthService {
     private jwtService: JwtService
   ) {}
 
-  async validateUser(username: string, pass: string): Promise<any> {
+  async validateUser(username: string, pass: string): Promise<Omit<User, 'password'> | null> {
     const user = await this.usersService.findOne(username);
-    if (user && user.password === pass) { // Note: In real app, use bcrypt
+    if (user && await bcrypt.compare(pass, user.password)) {
       const { password, ...result } = user;
       return result;
     }
     return null;
   }
 
-  async login(user: any) {
+  async login(user: Omit<User, 'password'>) {
     const payload = { username: user.username, sub: user.id };
     return {
       access_token: this.jwtService.sign(payload),
     };
   }
 
-  async register(userDto: any) {
-    return this.usersService.create(userDto);
+  async register(userDto: SignupDto) {
+    const newUser = await this.usersService.create(userDto);
+    const { password, ...userWithoutPassword } = newUser;
+    const payload = { username: newUser.username, sub: newUser.id };
+    return {
+      access_token: this.jwtService.sign(payload),
+      user: userWithoutPassword,
+    };
   }
 
   async getUserProfile(userId: number) {
     const user = await this.usersService.findById(userId);
-    if (user) {
-      const { password, ...result } = user;
-      return result;
+    if (!user) {
+      throw new NotFoundException('User not found');
     }
-    return null;
+    const { password, ...result } = user;
+    return result;
   }
 }
