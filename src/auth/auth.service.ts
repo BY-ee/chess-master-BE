@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { UsersService } from '../users/users.service';
 import { JwtService } from '@nestjs/jwt';
 import { SignupDto } from './dto/signup.dto';
@@ -39,10 +39,10 @@ export class AuthService {
 
   async getUserProfile(userId: number) {
     const user = await this.usersService.findById(userId);
-    if (user) {
-      const { password, ...result } = user;
-      return result;
+    if (!user) {
+      throw new NotFoundException('User not found');
     }
-    return null;
+    const { password, ...result } = user;
+    return result;
   }
 }
