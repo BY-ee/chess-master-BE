@@ -2,14 +2,23 @@ import { Injectable, ConflictException, InternalServerErrorException } from '@ne
 import { PrismaService } from '../prisma/prisma.service';
 import { User } from '@prisma/client';
 import { SignupDto } from '../auth/dto/signup.dto';
+import * as bcrypt from 'bcrypt';
 
 @Injectable()
 export class UsersService {
   constructor(private prisma: PrismaService) {}
 
   async create(data: SignupDto): Promise<User> {
+    const salt = await bcrypt.genSalt();
+    const hashedPassword = await bcrypt.hash(data.password, salt);
+    
     try {
-      return await this.prisma.user.create({ data });
+      return await this.prisma.user.create({ 
+        data: {
+          ...data,
+          password: hashedPassword
+        } 
+      });
     } catch (error) {
       if (error && typeof error === 'object' && 'code' in error && error.code === 'P2002') {
         throw new ConflictException('Username or Email already exists');
