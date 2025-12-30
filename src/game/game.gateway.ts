@@ -23,6 +23,7 @@ interface AuthenticatedSocket extends Socket {
 export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer() server: Server;
   private activeGames = new Map<string, GameState>();
+  private onlineUsers = new Set<number>(); // Track unique user IDs
 
   constructor(
     private readonly gameService: GameService,
@@ -51,7 +52,13 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
         username: payload.username,
       };
 
+      // Add user to online set
+      this.onlineUsers.add(client.user.id);
+      
       console.log(`Client connected: ${client.id} (User: ${client.user.username})`);
+      
+      // Broadcast updated online count to all clients
+      this.broadcastOnlineCount();
     } catch (error) {
       console.log('Invalid token, disconnecting client');
       client.disconnect();
@@ -60,8 +67,24 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
 
   handleDisconnect(client: AuthenticatedSocket) {
     const username = client.user?.username || 'Unknown';
+    
+    // Remove user from online set
+    if (client.user?.id) {
+      this.onlineUsers.delete(client.user.id);
+    }
+    
     console.log(`Client disconnected: ${client.id} (User: ${username})`);
+    
+    // Broadcast updated online count to all clients
+    this.broadcastOnlineCount();
   }
+
+  private broadcastOnlineCount() {
+    const count = this.onlineUsers.size;
+    this.server.emit('online_count', count);
+    console.log(`Online users: ${count}`);
+  }
+
 
   @SubscribeMessage('join_game')
   handleJoinGame(client: Socket, payload: { roomId: string; whiteId?: number; blackId?: number; whiteAiId?: number; blackAiId?: number }): string {
