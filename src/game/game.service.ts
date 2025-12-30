@@ -51,4 +51,71 @@ export class GameService {
       },
     });
   }
+
+  // In-memory room management (for MVP, can be moved to Redis later)
+  private rooms = new Map<string, {
+    roomId: string;
+    roomName?: string;
+    hostId: number;
+    hostUsername: string;
+    guestId?: number;
+    guestUsername?: string;
+    status: 'waiting' | 'playing' | 'finished';
+    createdAt: Date;
+  }>();
+
+  createRoom(hostId: number, hostUsername: string, roomName?: string) {
+    const roomId = `room_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const room = {
+      roomId,
+      roomName: roomName || `${hostUsername}'s room`,
+      hostId,
+      hostUsername,
+      status: 'waiting' as const,
+      createdAt: new Date(),
+    };
+    this.rooms.set(roomId, room);
+    return room;
+  }
+
+  joinRoom(roomId: string, guestId: number, guestUsername: string) {
+    const room = this.rooms.get(roomId);
+    if (!room) {
+      throw new Error('Room not found');
+    }
+    if (room.status !== 'waiting') {
+      throw new Error('Room is not available');
+    }
+    if (room.hostId === guestId) {
+      throw new Error('Cannot join your own room');
+    }
+    if (room.guestId) {
+      throw new Error('Room is full');
+    }
+
+    room.guestId = guestId;
+    room.guestUsername = guestUsername;
+    room.status = 'playing';
+    this.rooms.set(roomId, room);
+    return room;
+  }
+
+  getAvailableRooms() {
+    return Array.from(this.rooms.values())
+      .filter(room => room.status === 'waiting')
+      .map(({ roomId, roomName, hostUsername, createdAt }) => ({
+        roomId,
+        roomName,
+        hostUsername,
+        createdAt,
+      }));
+  }
+
+  getRoom(roomId: string) {
+    return this.rooms.get(roomId);
+  }
+
+  deleteRoom(roomId: string) {
+    this.rooms.delete(roomId);
+  }
 }

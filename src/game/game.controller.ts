@@ -1,6 +1,7 @@
-import { Controller, Post, Get, Body, UseGuards, Request } from '@nestjs/common';
+import { Controller, Post, Get, Body, UseGuards, Request, Param, NotFoundException, BadRequestException } from '@nestjs/common';
 import { GameService } from './game.service';
 import { SaveGameDto } from './dto/save-game.dto';
+import { CreateRoomDto } from './dto/create-room.dto';
 import { AuthGuard } from '@nestjs/passport';
 
 @Controller('games')
@@ -64,5 +65,40 @@ export class GameController {
   @UseGuards(AuthGuard('jwt'))
   async getMyGames(@Request() req: any) {
     return this.gameService.getGamesByUserId(req.user.id);
+  }
+
+  // Matchmaking endpoints
+  @Post('rooms')
+  @UseGuards(AuthGuard('jwt'))
+  async createRoom(@Request() req: any, @Body() createRoomDto: CreateRoomDto) {
+    return this.gameService.createRoom(
+      req.user.id,
+      req.user.username,
+      createRoomDto.roomName,
+    );
+  }
+
+  @Post('rooms/:roomId/join')
+  @UseGuards(AuthGuard('jwt'))
+  async joinRoom(@Request() req: any, @Param('roomId') roomId: string) {
+    try {
+      const room = this.gameService.joinRoom(
+        roomId,
+        req.user.id,
+        req.user.username,
+      );
+      return room;
+    } catch (error) {
+      if (error.message === 'Room not found') {
+        throw new NotFoundException(error.message);
+      }
+      throw new BadRequestException(error.message);
+    }
+  }
+
+  @Get('rooms')
+  @UseGuards(AuthGuard('jwt'))
+  async getAvailableRooms() {
+    return this.gameService.getAvailableRooms();
   }
 }
