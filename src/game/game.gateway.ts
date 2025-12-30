@@ -87,19 +87,48 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
 
 
   @SubscribeMessage('join_game')
-  handleJoinGame(client: Socket, payload: { roomId: string; whiteId?: number; blackId?: number; whiteAiId?: number; blackAiId?: number }): string {
+  @SubscribeMessage('join_game')
+  handleJoinGame(client: AuthenticatedSocket, payload: { roomId: string; whiteId?: number; blackId?: number; whiteAiId?: number; blackAiId?: number }): string {
     const { roomId, ...players } = payload;
     client.join(roomId);
     
-    if (!this.activeGames.has(roomId)) {
-      this.activeGames.set(roomId, {
+    // 1. Existing Game Check
+    let game = this.activeGames.get(roomId);
+    
+    if (!game) {
+      // 2. New Game Initialization
+      game = {
         ...players,
         pgn: '',
-      });
+      };
+      this.activeGames.set(roomId, game);
       console.log(`Game started in room ${roomId}`, players);
+    } else {
+      console.log(`User rejoined room ${roomId}`);
+    }
+
+    // 3. Determine Player Color (Role Persistence)
+    const userId = client.user?.id;
+    let color: 'w' | 'b' | null = null;
+
+    if (userId) {
+      if (game.whiteId === userId) color = 'w';
+      else if (game.blackId === userId) color = 'b';
+    }
+
+    // 4. Send Game Start/Restore Event
+    // If color is found, it means the user is a player, not just a spectator
+    if (color) {
+      client.emit('game_start', { 
+        color,
+        pgn: game.pgn, // Send current game state (PGN)
+        fen: '' // FEN not currently tracked in activeGames, preventing full restore if only FEN is used by FE. 
+                // However, PGN is sufficient for most engines to replay. 
+                // If FE needs FEN, we would need to maintain it or derive it.
+                // Sending PGN is a good first step as per requirements.
+      });
     }
     
-    // Optionally recover state if user reconnects (not fully diffed here, just basic join)
     return 'Game joined!';
   }
 
