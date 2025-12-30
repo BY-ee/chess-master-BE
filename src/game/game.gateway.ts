@@ -70,7 +70,10 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
           pgn: game.pgn,
           result: payload.result,
         });
-        this.server.to(payload.roomId).emit('game_ended', payload.result);
+        this.server.to(payload.roomId).emit('game_ended', {
+          winner: payload.result.includes('White') ? 'w' : payload.result.includes('Black') ? 'b' : 'draw', 
+          pgn: game.pgn 
+        });
         this.activeGames.delete(payload.roomId);
         return 'Game saved and ended';
       } catch (error) {
