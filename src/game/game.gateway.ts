@@ -1,6 +1,8 @@
 import { SubscribeMessage, WebSocketGateway, OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect, WebSocketServer } from '@nestjs/websockets';
 import { Socket, Server } from 'socket.io';
 import { GameService } from './game.service';
+import { JwtService } from '@nestjs/jwt';
+import { UnauthorizedException } from '@nestjs/common';
 
 interface GameState {
   whiteId?: number;
@@ -10,23 +12,55 @@ interface GameState {
   pgn: string;
 }
 
+interface AuthenticatedSocket extends Socket {
+  user?: {
+    id: number;
+    username: string;
+  };
+}
+
 @WebSocketGateway({ cors: true })
 export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer() server: Server;
   private activeGames = new Map<string, GameState>();
 
-  constructor(private readonly gameService: GameService) {}
+  constructor(
+    private readonly gameService: GameService,
+    private readonly jwtService: JwtService,
+  ) {}
 
   afterInit(server: Server) {
     console.log('Game Gateway Initialized');
   }
 
-  handleConnection(client: Socket, ...args: any[]) {
-    console.log(`Client connected: ${client.id}`);
+  async handleConnection(client: AuthenticatedSocket, ...args: any[]) {
+    try {
+      // Extract token from handshake auth
+      const token = client.handshake?.auth?.token;
+      
+      if (!token) {
+        console.log('No token provided, disconnecting client');
+        client.disconnect();
+        return;
+      }
+
+      // Verify JWT token
+      const payload = await this.jwtService.verifyAsync(token);
+      client.user = {
+        id: payload.sub,
+        username: payload.username,
+      };
+
+      console.log(`Client connected: ${client.id} (User: ${client.user.username})`);
+    } catch (error) {
+      console.log('Invalid token, disconnecting client');
+      client.disconnect();
+    }
   }
 
-  handleDisconnect(client: Socket) {
-    console.log(`Client disconnected: ${client.id}`);
+  handleDisconnect(client: AuthenticatedSocket) {
+    const username = client.user?.username || 'Unknown';
+    console.log(`Client disconnected: ${client.id} (User: ${username})`);
   }
 
   @SubscribeMessage('join_game')
