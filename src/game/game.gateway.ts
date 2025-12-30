@@ -92,29 +92,56 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
   }
 
   @SubscribeMessage('game_end')
-  async handleGameEnd(client: Socket, payload: { roomId: string; result: string }): Promise<string> {
+  async handleGameEnd(
+    client: AuthenticatedSocket,
+    payload: { roomId: string; winnerColor: 'w' | 'b' | null; pgn?: string },
+  ): Promise<string> {
     const game = this.activeGames.get(payload.roomId);
-    if (game) {
-      try {
-        await this.gameService.saveGameResult({
-          whiteId: game.whiteId,
-          blackId: game.blackId,
-          whiteAiId: game.whiteAiId,
-          blackAiId: game.blackAiId,
-          pgn: game.pgn,
-          result: payload.result,
-        });
-        this.server.to(payload.roomId).emit('game_ended', {
-          winner: payload.result.includes('White') ? 'w' : payload.result.includes('Black') ? 'b' : 'draw', 
-          pgn: game.pgn 
-        });
-        this.activeGames.delete(payload.roomId);
-        return 'Game saved and ended';
-      } catch (error) {
-        console.error('Error saving game:', error);
-        return 'Error saving game';
-      }
+    if (!game) {
+      return 'Game not found';
     }
-    return 'Game not found';
+
+    try {
+      // Convert winnerColor to PGN standard result
+      let result: string;
+      if (payload.winnerColor === 'w') {
+        result = '1-0';  // White wins
+      } else if (payload.winnerColor === 'b') {
+        result = '0-1';  // Black wins
+      } else {
+        result = '1/2-1/2';  // Draw
+      }
+
+      // Use provided PGN or fall back to tracked moves
+      const finalPgn = payload.pgn || game.pgn;
+
+      // Save to database
+      await this.gameService.saveGameResult({
+        whiteId: game.whiteId,
+        blackId: game.blackId,
+        whiteAiId: game.whiteAiId,
+        blackAiId: game.blackAiId,
+        pgn: finalPgn,
+        result,
+      });
+
+      // Notify all clients in the room
+      this.server.to(payload.roomId).emit('game_ended', {
+        result,  // PGN format: "1-0", "0-1", "1/2-1/2"
+        saved: true,
+      });
+
+      // Clean up
+      this.activeGames.delete(payload.roomId);
+      const room = this.gameService.getRoom(payload.roomId);
+      if (room) {
+        this.gameService.deleteRoom(payload.roomId);
+      }
+
+      return 'Game saved and ended';
+    } catch (error) {
+      console.error('Error saving game:', error);
+      return 'Error saving game';
+    }
   }
 }
