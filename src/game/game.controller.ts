@@ -1,4 +1,4 @@
-import { Controller, Post, Body, UseGuards, Request } from '@nestjs/common';
+import { Controller, Post, Get, Body, UseGuards, Request } from '@nestjs/common';
 import { GameService } from './game.service';
 import { SaveGameDto } from './dto/save-game.dto';
 import { AuthGuard } from '@nestjs/passport';
@@ -40,5 +40,11 @@ export class GameController {
     }
 
     return this.gameService.saveGameResult(gameData);
+  }
+
+  @Get()
+  @UseGuards(AuthGuard('jwt'))
+  async getMyGames(@Request() req: any) {
+    return this.gameService.getGamesByUserId(req.user.id);
   }
 }

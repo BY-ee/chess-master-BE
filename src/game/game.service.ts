@@ -31,4 +31,24 @@ export class GameService {
       },
     });
   }
+
+  async getGamesByUserId(userId: number) {
+    return this.prisma.game.findMany({
+      where: {
+        OR: [
+          { whiteId: userId },
+          { blackId: userId },
+        ],
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+      include: {
+        white: { select: { username: true } },
+        black: { select: { username: true } },
+        whiteAi: { select: { name: true } },
+        blackAi: { select: { name: true } },
+      },
+    });
+  }
 }
