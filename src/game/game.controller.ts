@@ -24,10 +24,20 @@ export class GameController {
     // Determine player capability based on configured role or DTO
     const userColor = saveGameDto.userColor || 'w'; // Default to white if not specified
     
+    // Convert to PGN standard result format
+    let result: string;
+    if (saveGameDto.winnerColor === 'w') {
+      result = '1-0';  // White wins
+    } else if (saveGameDto.winnerColor === 'b') {
+      result = '0-1';  // Black wins
+    } else {
+      result = '1/2-1/2';  // Draw
+    }
+
     // Construct game data
     const gameData: any = {
       pgn: saveGameDto.pgn,
-      result: `${saveGameDto.result} (${saveGameDto.winnerColor || '-'})`,
+      result,
     };
 
     if (saveGameDto.mode === 'ai') {
