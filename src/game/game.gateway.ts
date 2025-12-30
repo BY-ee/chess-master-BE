@@ -92,11 +92,11 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
     const { roomId, ...players } = payload;
     client.join(roomId);
     
-    // 1. Existing Game Check
+    // 1. Existing Game Check & Update
     let game = this.activeGames.get(roomId);
     
     if (!game) {
-      // 2. New Game Initialization
+      // New Game Initialization
       game = {
         ...players,
         pgn: '',
@@ -104,30 +104,29 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
       this.activeGames.set(roomId, game);
       console.log(`Game started in room ${roomId}`, players);
     } else {
+      // Update missing player info (e.g. Guest joining after Host)
+      if (players.whiteId && !game.whiteId) game.whiteId = players.whiteId;
+      if (players.blackId && !game.blackId) game.blackId = players.blackId;
       console.log(`User rejoined room ${roomId}`);
     }
 
-    // 3. Determine Player Color (Role Persistence)
+    // 2. Determine Player Color (Role Persistence)
     const userId = client.user?.id;
-    let color: 'w' | 'b' | null = null;
+    let color: 'w' | 'b' | 'spectator' = 'spectator';
 
     if (userId) {
       if (game.whiteId === userId) color = 'w';
       else if (game.blackId === userId) color = 'b';
     }
 
-    // 4. Send Game Start/Restore Event
-    // If color is found, it means the user is a player, not just a spectator
-    if (color) {
-      client.emit('game_start', { 
-        color,
-        pgn: game.pgn, // Send current game state (PGN)
-        fen: '' // FEN not currently tracked in activeGames, preventing full restore if only FEN is used by FE. 
-                // However, PGN is sufficient for most engines to replay. 
-                // If FE needs FEN, we would need to maintain it or derive it.
-                // Sending PGN is a good first step as per requirements.
-      });
-    }
+    // 3. Send Game Start/Restore Event
+    // Send state to everyone, including spectators
+    client.emit('game_start', { 
+      color: color === 'spectator' ? 'w' : color, // Spectators view as White by default
+      role: color, // Explicit role for UI adjustments
+      pgn: game.pgn, 
+      fen: '' 
+    });
     
     return 'Game joined!';
   }
