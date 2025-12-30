@@ -53,6 +53,7 @@ export class GameService {
   }
 
   // In-memory room management (for MVP, can be moved to Redis later)
+  // Extended to hold active game state
   private rooms = new Map<string, {
     roomId: string;
     roomName?: string;
@@ -62,6 +63,10 @@ export class GameService {
     guestUsername?: string;
     status: 'waiting' | 'playing' | 'finished';
     createdAt: Date;
+    // Game State
+    whiteId?: number;
+    blackId?: number;
+    pgn: string;
   }>();
 
   createRoom(hostId: number, hostUsername: string, roomName?: string) {
@@ -73,6 +78,7 @@ export class GameService {
       hostUsername,
       status: 'waiting' as const,
       createdAt: new Date(),
+      pgn: '',
     };
     this.rooms.set(roomId, room);
     return room;
@@ -96,6 +102,11 @@ export class GameService {
     room.guestId = guestId;
     room.guestUsername = guestUsername;
     room.status = 'playing';
+    
+    // Assign colors (Host = White by default for now)
+    room.whiteId = room.hostId;
+    room.blackId = guestId;
+    
     this.rooms.set(roomId, room);
     return room;
   }

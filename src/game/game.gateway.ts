@@ -20,9 +20,9 @@ interface AuthenticatedSocket extends Socket {
 }
 
 @WebSocketGateway({ cors: true })
+@WebSocketGateway({ cors: true })
 export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer() server: Server;
-  private activeGames = new Map<string, GameState>();
   private onlineUsers = new Set<number>(); // Track unique user IDs
 
   constructor(
@@ -87,44 +87,37 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
 
 
   @SubscribeMessage('join_game')
-  @SubscribeMessage('join_game')
   handleJoinGame(client: AuthenticatedSocket, payload: { roomId: string; whiteId?: number; blackId?: number; whiteAiId?: number; blackAiId?: number }): string {
-    const { roomId, ...players } = payload;
-    client.join(roomId);
+    const { roomId } = payload;
     
-    // 1. Existing Game Check & Update
-    let game = this.activeGames.get(roomId);
+    // 1. Validate Room Existence via GameService
+    // Only allow joining rooms that were created via API (random matching or custom)
+    const room = this.gameService.getRoom(roomId);
     
-    if (!game) {
-      // New Game Initialization
-      game = {
-        ...players,
-        pgn: '',
-      };
-      this.activeGames.set(roomId, game);
-      console.log(`Game started in room ${roomId}`, players);
-    } else {
-      // Update missing player info (e.g. Guest joining after Host)
-      if (players.whiteId && !game.whiteId) game.whiteId = players.whiteId;
-      if (players.blackId && !game.blackId) game.blackId = players.blackId;
-      console.log(`User rejoined room ${roomId}`);
+    if (!room) {
+      console.log(`Connection rejected: Room ${roomId} not found`);
+      client.emit('error', 'Room does not exist');
+      return 'Room not found';
     }
 
+    client.join(roomId);
+    console.log(`User rejoined/joined room ${roomId}`);
+
     // 2. Determine Player Color (Role Persistence)
+    // Uses the authoritative data from GameService, NOT the user payload (prevent spoofing)
     const userId = client.user?.id;
     let color: 'w' | 'b' | 'spectator' = 'spectator';
 
     if (userId) {
-      if (game.whiteId === userId) color = 'w';
-      else if (game.blackId === userId) color = 'b';
+      if (room.whiteId === userId) color = 'w';
+      else if (room.blackId === userId) color = 'b';
     }
 
     // 3. Send Game Start/Restore Event
-    // Send state to everyone, including spectators
     client.emit('game_start', { 
       color: color === 'spectator' ? 'w' : color, // Spectators view as White by default
-      role: color, // Explicit role for UI adjustments
-      pgn: game.pgn, 
+      role: color, 
+      pgn: room.pgn || '', 
       fen: '' 
     });
     
@@ -133,9 +126,12 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
 
   @SubscribeMessage('make_move')
   handleMove(client: Socket, payload: { roomId: string; move: string }): string {
-    const game = this.activeGames.get(payload.roomId);
-    if (game) {
-      game.pgn += (game.pgn ? ' ' : '') + payload.move;
+    const room = this.gameService.getRoom(payload.roomId);
+    if (room) {
+      // Append move to PGN in GameService state
+      room.pgn = (room.pgn ? room.pgn + ' ' : '') + payload.move;
+      
+      // Broadcast move
       this.server.to(payload.roomId).emit('move_made', payload.move);
       return 'Move made!';
     }
@@ -147,8 +143,8 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
     client: AuthenticatedSocket,
     payload: { roomId: string; winnerColor: 'w' | 'b' | null; pgn?: string },
   ): Promise<string> {
-    const game = this.activeGames.get(payload.roomId);
-    if (!game) {
+    const room = this.gameService.getRoom(payload.roomId);
+    if (!room) {
       return 'Game not found';
     }
 
@@ -156,38 +152,33 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
       // Convert winnerColor to PGN standard result
       let result: string;
       if (payload.winnerColor === 'w') {
-        result = '1-0';  // White wins
+        result = '1-0';
       } else if (payload.winnerColor === 'b') {
-        result = '0-1';  // Black wins
+        result = '0-1';
       } else {
-        result = '1/2-1/2';  // Draw
+        result = '1/2-1/2';
       }
 
       // Use provided PGN or fall back to tracked moves
-      const finalPgn = payload.pgn || game.pgn;
+      const finalPgn = payload.pgn || room.pgn;
 
       // Save to database
       await this.gameService.saveGameResult({
-        whiteId: game.whiteId,
-        blackId: game.blackId,
-        whiteAiId: game.whiteAiId,
-        blackAiId: game.blackAiId,
+        whiteId: room.whiteId,
+        blackId: room.blackId,
+        // AI IDs not currently tracked in room for Multiplayer, assuming user vs user for now
         pgn: finalPgn,
         result,
       });
 
       // Notify all clients in the room
       this.server.to(payload.roomId).emit('game_ended', {
-        result,  // PGN format: "1-0", "0-1", "1/2-1/2"
+        result,
         saved: true,
       });
 
       // Clean up
-      this.activeGames.delete(payload.roomId);
-      const room = this.gameService.getRoom(payload.roomId);
-      if (room) {
-        this.gameService.deleteRoom(payload.roomId);
-      }
+      this.gameService.deleteRoom(payload.roomId);
 
       return 'Game saved and ended';
     } catch (error) {
