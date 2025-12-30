@@ -167,4 +167,12 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
       return 'Error saving game';
     }
   }
+
+  @SubscribeMessage('leave_game')
+  handleLeaveGame(client: Socket, payload: { roomId: string }): string {
+    const { roomId } = payload;
+    client.leave(roomId);
+    console.log(`Client ${client.id} left room ${roomId}`);
+    return 'Left room';
+  }
 }
