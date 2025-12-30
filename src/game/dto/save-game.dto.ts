@@ -15,5 +15,10 @@ export class SaveGameDto {
   winnerColor?: string;
 
   @IsString()
+  @IsOptional()
+  @IsIn(['w', 'b'])
+  userColor?: string;
+
+  @IsString()
   pgn: string;
 }

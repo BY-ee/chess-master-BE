@@ -21,22 +21,30 @@ export class GameController {
     
     const userId = req.user.id;
     
-    // Default assumption for AI mode: User is White, AI is Black(?).
-    // Better would be if DTO said "userColor".
-    // Since DTO doesn't specify, we'll just link the user as 'whiteId' for now (or improve DTO later).
+    // Determine player capability based on configured role or DTO
+    const userColor = saveGameDto.userColor || 'w'; // Default to white if not specified
     
+    // Construct game data
     const gameData: any = {
       pgn: saveGameDto.pgn,
       result: `${saveGameDto.result} (${saveGameDto.winnerColor || '-'})`,
     };
 
     if (saveGameDto.mode === 'ai') {
-        gameData.whiteId = userId; 
-        // We could also link a default AI model if we have one.
+        if (userColor === 'b') {
+            gameData.blackId = userId;
+            // whiteAiId would be linked here if we had AI model info
+        } else {
+            gameData.whiteId = userId;
+            // blackAiId would be linked here
+        }
     } else {
-        // User vs User via API? Usually specific match ID is needed. 
-        // This endpoint seems primarily for "Client completed an offline/AI game and wants to save it".
-        gameData.whiteId = userId;
+        // Fallback for generic modes - assumes user matches the requested color
+        if (userColor === 'b') {
+            gameData.blackId = userId;
+        } else {
+            gameData.whiteId = userId;
+        }
     }
 
     return this.gameService.saveGameResult(gameData);
