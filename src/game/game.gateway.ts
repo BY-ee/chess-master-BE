@@ -177,8 +177,11 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
         saved: true,
       });
 
-      // Clean up
-      this.gameService.deleteRoom(payload.roomId);
+      // Update room status to finished instead of deleting
+      room.status = 'finished';
+      
+      // Note: Room cleanup should be handled when users leave or via TTL/Cron
+      // this.gameService.deleteRoom(payload.roomId);
 
       return 'Game saved and ended';
     } catch (error) {
