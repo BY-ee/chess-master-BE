@@ -63,11 +63,37 @@ export class GameService {
     guestUsername?: string;
     status: 'waiting' | 'playing' | 'finished';
     createdAt: Date;
-    // Game State
     whiteId?: number;
     blackId?: number;
     pgn: string;
+    finishedAt?: Date;
+    rematchRequestedBy?: number;
+    rematchExpiresAt?: Date;
+    cleanupTimer?: NodeJS.Timeout;
   }>();
+
+  // Helper to clear timeout safely
+  private clearCleanupTimer(roomId: string) {
+    const room = this.rooms.get(roomId);
+    if (room?.cleanupTimer) {
+      clearTimeout(room.cleanupTimer);
+      room.cleanupTimer = undefined;
+    }
+  }
+
+  scheduleRoomCleanup(roomId: string, seconds: number = 180) {
+    this.clearCleanupTimer(roomId);
+    
+    const room = this.rooms.get(roomId);
+    if (!room) return;
+
+    const timeout = setTimeout(() => {
+      console.log(`Auto-deleting room ${roomId} after ${seconds}s`);
+      this.deleteRoom(roomId);
+    }, seconds * 1000);
+
+    room.cleanupTimer = timeout;
+  }
 
   createRoom(hostId: number, hostUsername: string, roomName?: string) {
     const roomId = `room_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -127,6 +153,65 @@ export class GameService {
   }
 
   deleteRoom(roomId: string) {
+    this.clearCleanupTimer(roomId);
     this.rooms.delete(roomId);
+  }
+
+  requestRematch(roomId: string, userId: number) {
+    const room = this.rooms.get(roomId);
+    if (!room || room.status !== 'finished') {
+      throw new Error('Room not valid for rematch');
+    }
+
+    // Check if room is within 3-minute hard TTL
+    const now = new Date();
+    if (room.finishedAt && (now.getTime() - room.finishedAt.getTime() > 180000)) {
+       throw new Error('Room expired');
+    }
+
+    room.rematchRequestedBy = userId;
+    // Set 60-second acceptance window
+    room.rematchExpiresAt = new Date(Date.now() + 60000); 
+    
+    return {
+      rematchExpiresAt: room.rematchExpiresAt
+    };
+  }
+
+  acceptRematch(roomId: string, userId: number) {
+    const room = this.rooms.get(roomId);
+    if (!room) throw new Error('Room not found');
+    
+    // Check if a rematch was requested
+    if (!room.rematchRequestedBy || !room.rematchExpiresAt) {
+      throw new Error('No rematch requested');
+    }
+
+    // Prevent accepting one's own request
+    if (room.rematchRequestedBy === userId) {
+      throw new Error('Cannot accept your own request');
+    }
+
+    // Check 60-second window
+    if (new Date() > room.rematchExpiresAt) {
+      // Clear request if expired
+      room.rematchRequestedBy = undefined;
+      room.rematchExpiresAt = undefined;
+      throw new Error('Rematch request expired');
+    }
+
+    // Valid rematch: Reset game state
+    room.status = 'playing';
+    room.pgn = '';
+    room.finishedAt = undefined;
+    room.rematchRequestedBy = undefined;
+    room.rematchExpiresAt = undefined;
+    
+    // Swap colors for rematch (optional standard practice)
+    const oldWhite = room.whiteId;
+    room.whiteId = room.blackId;
+    room.blackId = oldWhite;
+
+    return room;
   }
 }

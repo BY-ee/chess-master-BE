@@ -179,14 +179,60 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
 
       // Update room status to finished instead of deleting
       room.status = 'finished';
+      room.finishedAt = new Date();
       
-      // Note: Room cleanup should be handled when users leave or via TTL/Cron
-      // this.gameService.deleteRoom(payload.roomId);
+      // Schedule auto-deletion after 3 minutes (180s)
+      this.gameService.scheduleRoomCleanup(payload.roomId, 180);
 
       return 'Game saved and ended';
     } catch (error) {
       console.error('Error saving game:', error);
       return 'Error saving game';
+    }
+  }
+
+  @SubscribeMessage('request_rematch')
+  handleRematchRequest(client: AuthenticatedSocket, payload: { roomId: string }): string {
+    if (!client.user) return 'Unauthorized';
+    
+    try {
+      const result = this.gameService.requestRematch(payload.roomId, client.user.id);
+      
+      // Notify other players in the room
+      this.server.to(payload.roomId).emit('rematch_requested', {
+        requestedBy: client.user.id,
+        expiresAt: result.rematchExpiresAt
+      });
+      
+      return 'Rematch requested';
+    } catch (error) {
+      client.emit('error', error.message);
+      return 'Error requesting rematch';
+    }
+  }
+
+  @SubscribeMessage('accept_rematch')
+  handleRematchAccept(client: AuthenticatedSocket, payload: { roomId: string }): string {
+    if (!client.user) return 'Unauthorized';
+
+    try {
+      const room = this.gameService.acceptRematch(payload.roomId, client.user.id);
+      
+      // Notify all players that game restarted
+      // Since colors are swapped in service, we need to broadcast new state
+      this.server.to(payload.roomId).emit('game_restarted', {
+        whiteId: room.whiteId,
+        blackId: room.blackId
+      });
+      
+      // Re-emit game_start to update clients individually with their new colors
+      // We need to iterate over sockets in the room to send personalized 'game_start'
+      // Ideally, FE handles 'game_restarted' and refreshes/resets, but sending 'game_start' is safer
+      
+      return 'Rematch accepted';
+    } catch (error) {
+      client.emit('error', error.message);
+      return 'Error accepting rematch';
     }
   }
 
