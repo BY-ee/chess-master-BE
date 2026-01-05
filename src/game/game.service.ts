@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma } from '@prisma/client';
+import { GameException, GameErrorCode } from './game.exception';
 
 @Injectable()
 export class GameService {
@@ -105,6 +106,8 @@ export class GameService {
       status: 'waiting' as const,
       createdAt: new Date(),
       pgn: '',
+      whiteId: hostId, // Assign Host as White immediately
+      blackId: undefined
     };
     this.rooms.set(roomId, room);
     return room;
@@ -113,24 +116,23 @@ export class GameService {
   joinRoom(roomId: string, guestId: number, guestUsername: string) {
     const room = this.rooms.get(roomId);
     if (!room) {
-      throw new Error('Room not found');
+      throw new GameException(GameErrorCode.ROOM_NOT_FOUND, 'Room not found');
     }
     if (room.status !== 'waiting') {
-      throw new Error('Room is not available');
+      throw new GameException(GameErrorCode.ROOM_NOT_AVAILABLE, 'Room is not available');
     }
     if (room.hostId === guestId) {
-      throw new Error('Cannot join your own room');
+      throw new GameException(GameErrorCode.INVALID_ACTION, 'Cannot join your own room');
     }
     if (room.guestId) {
-      throw new Error('Room is full');
+      throw new GameException(GameErrorCode.ROOM_FULL, 'Room is full');
     }
 
     room.guestId = guestId;
     room.guestUsername = guestUsername;
     room.status = 'playing';
     
-    // Assign colors (Host = White by default for now)
-    room.whiteId = room.hostId;
+    // Assign colors (Host is already White)
     room.blackId = guestId;
     
     this.rooms.set(roomId, room);
@@ -148,6 +150,15 @@ export class GameService {
       }));
   }
 
+  findRoomByUserId(userId: number) {
+    for (const room of this.rooms.values()) {
+      if (room.whiteId === userId || room.blackId === userId) {
+        return room;
+      }
+    }
+    return undefined;
+  }
+
   getRoom(roomId: string) {
     return this.rooms.get(roomId);
   }
@@ -160,13 +171,13 @@ export class GameService {
   requestRematch(roomId: string, userId: number) {
     const room = this.rooms.get(roomId);
     if (!room || room.status !== 'finished') {
-      throw new Error('Room not valid for rematch');
+      throw new GameException(GameErrorCode.ROOM_EXPIRED, 'Room not valid for rematch');
     }
 
     // Check if room is within 3-minute hard TTL
     const now = new Date();
     if (room.finishedAt && (now.getTime() - room.finishedAt.getTime() > 180000)) {
-       throw new Error('Room expired');
+       throw new GameException(GameErrorCode.ROOM_EXPIRED, 'Room expired');
     }
 
     room.rematchRequestedBy = userId;
@@ -180,16 +191,16 @@ export class GameService {
 
   acceptRematch(roomId: string, userId: number) {
     const room = this.rooms.get(roomId);
-    if (!room) throw new Error('Room not found');
+    if (!room) throw new GameException(GameErrorCode.ROOM_NOT_FOUND, 'Room not found');
     
     // Check if a rematch was requested
     if (!room.rematchRequestedBy || !room.rematchExpiresAt) {
-      throw new Error('No rematch requested');
+      throw new GameException(GameErrorCode.NO_REMATCH_REQUEST, 'No rematch requested');
     }
 
     // Prevent accepting one's own request
     if (room.rematchRequestedBy === userId) {
-      throw new Error('Cannot accept your own request');
+      throw new GameException(GameErrorCode.INVALID_ACTION, 'Cannot accept your own request');
     }
 
     // Check 60-second window
@@ -197,7 +208,7 @@ export class GameService {
       // Clear request if expired
       room.rematchRequestedBy = undefined;
       room.rematchExpiresAt = undefined;
-      throw new Error('Rematch request expired');
+      throw new GameException(GameErrorCode.REMATCH_EXPIRED, 'Rematch request expired');
     }
 
     // Valid rematch: Reset game state
@@ -217,10 +228,10 @@ export class GameService {
 
   declineRematch(roomId: string, userId: number) {
     const room = this.rooms.get(roomId);
-    if (!room) throw new Error('Room not found');
+    if (!room) throw new GameException(GameErrorCode.ROOM_NOT_FOUND, 'Room not found');
 
     if (!room.rematchRequestedBy) {
-      throw new Error('No active rematch request');
+      throw new GameException(GameErrorCode.NO_REMATCH_REQUEST, 'No active rematch request');
     }
 
     // Clear request

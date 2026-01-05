@@ -3,6 +3,7 @@ import { Socket, Server } from 'socket.io';
 import { GameService } from './game.service';
 import { JwtService } from '@nestjs/jwt';
 import { UnauthorizedException } from '@nestjs/common';
+import { GameException } from './game.exception';
 
 interface GameState {
   whiteId?: number;
@@ -19,7 +20,6 @@ interface AuthenticatedSocket extends Socket {
   };
 }
 
-@WebSocketGateway({ cors: true })
 @WebSocketGateway({ cors: true })
 export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer() server: Server;
@@ -52,6 +52,9 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
         username: payload.username,
       };
 
+      // Store user in data for fetchSockets() access
+      client.data.user = client.user;
+
       // Add user to online set
       this.onlineUsers.add(client.user.id);
       
@@ -65,18 +68,73 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
     }
   }
 
-  handleDisconnect(client: AuthenticatedSocket) {
+  async handleDisconnect(client: AuthenticatedSocket) {
     const username = client.user?.username || 'Unknown';
+    const userId = client.user?.id;
     
     // Remove user from online set
-    if (client.user?.id) {
-      this.onlineUsers.delete(client.user.id);
+    if (userId) {
+      this.onlineUsers.delete(userId);
     }
     
     console.log(`Client disconnected: ${client.id} (User: ${username})`);
     
     // Broadcast updated online count to all clients
     this.broadcastOnlineCount();
+
+    // Check if user was in a game room and notify others
+    // Since Socket.IO automatically removes the socket from rooms on disconnect,
+    // we can't iterate client.rooms here reliably.
+    // However, for MVP, we might need a way to look up which room the user was in.
+    // For now, let's skip complex reverse-lookup unless 'leave_game' is explicitly called,
+    // OR we iterate active rooms in GameService to find the user (expensive).
+    //
+    // ALTERNATIVE: Rely on 'leave_game' for clean exits, but for disconnections:
+    // We can try to find rooms where this user is White or Black.
+    if (userId) {
+      this.broadcastPlayerLeft(userId, username);
+    }
+  }
+
+  // Helper to find and notify rooms where the disconnected user was a player
+  private async broadcastPlayerLeft(userId: number, username: string) {
+    // This is a bit inefficient (O(N) rooms), but fine for MVP scale.
+    // Ideally GameService should map userId -> roomId.
+    const availableRooms = this.gameService.getAvailableRooms(); // Only gets waiting rooms... we need ALL active rooms.
+    // We can't easily access private 'rooms' map in GameService without a new method.
+    // Let's add a method to GameService to find room by userId if needed, 
+    // BUT for now, let's implement the logic in `handleLeaveGame` first, which is simpler.
+    
+    // Actually, let's just use the `leave_game` handler for explicit leaves.
+    // For unexpected disconnects, we might need the GameService to expose a "findRoomByPlayerId" method.
+    // Let's defer "automatic disconnect broadcast" for a moment and focus on `handleLeaveGame` per request.
+    //
+    // Wait, the request says "Trigger: When a socket disconnects OR leave_game is called".
+    // So we DO need to handle disconnect.
+    
+    const room = this.gameService.findRoomByUserId(userId);
+    if (room) {
+        const roomId = room.roomId;
+        // Calculate remaining players
+        // Since this user just disconnected, they are technically "gone".
+        // Use fetchSockets to count remaining.
+        const sockets = await this.server.in(roomId).fetchSockets();
+        let playerCount = 0;
+        const connectedUserIds = new Set<number>();
+         for (const socket of sockets) {
+            const socketUserId = (socket.data as any).user?.id;
+             if (socketUserId) connectedUserIds.add(socketUserId);
+         }
+         
+         if (room.whiteId && connectedUserIds.has(room.whiteId)) playerCount++;
+         if (room.blackId && connectedUserIds.has(room.blackId)) playerCount++;
+
+         this.server.to(roomId).emit('player_left', {
+             userId,
+             username,
+             currentPlayers: playerCount
+         });
+    }
   }
 
   private broadcastOnlineCount() {
@@ -87,41 +145,89 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
 
 
   @SubscribeMessage('join_game')
-  handleJoinGame(client: AuthenticatedSocket, payload: { roomId: string; whiteId?: number; blackId?: number; whiteAiId?: number; blackAiId?: number }): string {
+  async handleJoinGame(client: AuthenticatedSocket, payload: { roomId: string; whiteId?: number; blackId?: number; whiteAiId?: number; blackAiId?: number }): Promise<string> {
     const { roomId } = payload;
     
     // 1. Validate Room Existence via GameService
-    // Only allow joining rooms that were created via API (random matching or custom)
-    const room = this.gameService.getRoom(roomId);
-    
-    if (!room) {
-      console.log(`Connection rejected: Room ${roomId} not found`);
-      client.emit('error', 'Room does not exist');
-      return 'Room not found';
+    try {
+      const room = this.gameService.getRoom(roomId);
+      
+      if (!room) {
+        console.log(`Connection rejected: Room ${roomId} not found`);
+        client.emit('error', { code: 'ROOM_NOT_FOUND', message: 'Room does not exist' });
+        return 'Room not found';
+      }
+
+      client.join(roomId);
+      console.log(`User ${client.user?.username} (ID: ${client.user?.id}) joined room ${roomId}`);
+
+      // 2. Determine Player Color (Role Persistence)
+      const userId = client.user?.id;
+      let color: 'w' | 'b' | 'spectator' = 'spectator';
+
+      if (userId) {
+        if (room.whiteId === userId) color = 'w';
+        else if (room.blackId === userId) color = 'b';
+      }
+
+      // 3. Send Game Start/Restore Event (Initial State)
+      client.emit('game_start', { 
+        color: color === 'spectator' ? 'w' : color, 
+        role: color, 
+        pgn: room.pgn || '', 
+        fen: '' 
+      });
+
+      // 4. Calculate Connected Players & Emit 'player_joined'
+      const sockets = await this.server.in(roomId).fetchSockets();
+      // Map sockets to user IDs
+      const connectedUserIds = new Set<number>();
+      
+      // Explicitly add current user (to ensure they are counted even if fetchSockets has a delay)
+      if (userId) {
+        connectedUserIds.add(userId);
+      }
+      
+      for (const socket of sockets) {
+        // cast to any to access data safely if type inference fails, though RemoteSocket has data
+        const socketUserId = (socket.data as any).user?.id;
+        if (socketUserId) {
+          connectedUserIds.add(socketUserId);
+        }
+      }
+
+      // Count how many "Players" (white/black) are actually connected
+      let playerCount = 0;
+      if (room.whiteId && connectedUserIds.has(room.whiteId)) playerCount++;
+      if (room.blackId && connectedUserIds.has(room.blackId)) playerCount++;
+
+      // Broadcast player_joined to everyone in the room
+      this.server.to(roomId).emit('player_joined', {
+        userId: userId,
+        username: client.user?.username,
+        role: color,
+        currentPlayers: playerCount // Updated count
+      });
+
+      // 5. Check Game Ready Condition
+      // If both White and Black slots are filled AND both are connected
+      if (room.whiteId && room.blackId && 
+          connectedUserIds.has(room.whiteId) && 
+          connectedUserIds.has(room.blackId)) {
+        
+        console.log(`Game Room ${roomId} is READY (Both players connected)`);
+        this.server.to(roomId).emit('game_ready', {
+          roomId,
+          whiteId: room.whiteId,
+          blackId: room.blackId
+        });
+      }
+      
+      return 'Game joined!';
+    } catch (error) {
+       client.emit('error', { code: 'GENERIC_ERROR', message: error.message });
+       return 'Error joining';
     }
-
-    client.join(roomId);
-    console.log(`User rejoined/joined room ${roomId}`);
-
-    // 2. Determine Player Color (Role Persistence)
-    // Uses the authoritative data from GameService, NOT the user payload (prevent spoofing)
-    const userId = client.user?.id;
-    let color: 'w' | 'b' | 'spectator' = 'spectator';
-
-    if (userId) {
-      if (room.whiteId === userId) color = 'w';
-      else if (room.blackId === userId) color = 'b';
-    }
-
-    // 3. Send Game Start/Restore Event
-    client.emit('game_start', { 
-      color: color === 'spectator' ? 'w' : color, // Spectators view as White by default
-      role: color, 
-      pgn: room.pgn || '', 
-      fen: '' 
-    });
-    
-    return 'Game joined!';
   }
 
   @SubscribeMessage('make_move')
@@ -206,7 +312,7 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
       
       return 'Rematch requested';
     } catch (error) {
-      client.emit('error', error.message);
+      this.handleError(client, error);
       return 'Error requesting rematch';
     }
   }
@@ -231,7 +337,7 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
       
       return 'Rematch accepted';
     } catch (error) {
-      client.emit('error', error.message);
+      this.handleError(client, error);
       return 'Error accepting rematch';
     }
   }
@@ -249,16 +355,50 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
       
       return 'Rematch declined';
     } catch (error) {
-      // client.emit('error', error.message); // Optional
+      this.handleError(client, error);
       return 'Error declining rematch';
     }
   }
 
+  private handleError(client: Socket, error: any) {
+    if (error instanceof GameException) {
+      client.emit('error', { code: error.code, message: error.message });
+    } else {
+      client.emit('error', { code: 'GENERIC_ERROR', message: error.message || 'Unknown error' });
+    }
+  }
+
+
   @SubscribeMessage('leave_game')
-  handleLeaveGame(client: Socket, payload: { roomId: string }): string {
+  async handleLeaveGame(client: AuthenticatedSocket, payload: { roomId: string }): Promise<string> {
     const { roomId } = payload;
     client.leave(roomId);
     console.log(`Client ${client.id} left room ${roomId}`);
+    
+    if (client.user) {
+        const room = this.gameService.getRoom(roomId);
+        if (room) {
+            // Calculate remaining players
+             const sockets = await this.server.in(roomId).fetchSockets();
+             let playerCount = 0;
+             const connectedUserIds = new Set<number>();
+             
+             for (const socket of sockets) {
+                const socketUserId = (socket.data as any).user?.id;
+                 if (socketUserId) connectedUserIds.add(socketUserId);
+             }
+             
+             if (room.whiteId && connectedUserIds.has(room.whiteId)) playerCount++;
+             if (room.blackId && connectedUserIds.has(room.blackId)) playerCount++;
+
+            this.server.to(roomId).emit('player_left', {
+                userId: client.user.id,
+                username: client.user.username,
+                currentPlayers: playerCount
+            });
+        }
+    }
+    
     return 'Left room';
   }
 }
