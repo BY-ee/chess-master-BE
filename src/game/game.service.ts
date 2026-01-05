@@ -214,4 +214,19 @@ export class GameService {
 
     return room;
   }
+
+  declineRematch(roomId: string, userId: number) {
+    const room = this.rooms.get(roomId);
+    if (!room) throw new Error('Room not found');
+
+    if (!room.rematchRequestedBy) {
+      throw new Error('No active rematch request');
+    }
+
+    // Clear request
+    room.rematchRequestedBy = undefined;
+    room.rematchExpiresAt = undefined;
+
+    return room;
+  }
 }

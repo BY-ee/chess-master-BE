@@ -236,6 +236,24 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
     }
   }
 
+  @SubscribeMessage('decline_rematch')
+  handleRematchDecline(client: AuthenticatedSocket, payload: { roomId: string }): string {
+    if (!client.user) return 'Unauthorized';
+
+    try {
+      this.gameService.declineRematch(payload.roomId, client.user.id);
+      
+      this.server.to(payload.roomId).emit('rematch_declined', {
+        declinedBy: client.user.id
+      });
+      
+      return 'Rematch declined';
+    } catch (error) {
+      // client.emit('error', error.message); // Optional
+      return 'Error declining rematch';
+    }
+  }
+
   @SubscribeMessage('leave_game')
   handleLeaveGame(client: Socket, payload: { roomId: string }): string {
     const { roomId } = payload;
