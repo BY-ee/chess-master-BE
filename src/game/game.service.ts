@@ -150,6 +150,21 @@ export class GameService {
       }));
   }
 
+  getUserActiveRooms(userId: number) {
+    return Array.from(this.rooms.values())
+      .filter(room => 
+        (room.status === 'playing' || room.status === 'waiting') && 
+        (room.whiteId === userId || room.blackId === userId)
+      )
+      .map(({ roomId, roomName, hostUsername, status, createdAt }) => ({
+        roomId,
+        roomName,
+        hostUsername,
+        status,
+        createdAt,
+      }));
+  }
+
   findRoomByUserId(userId: number) {
     for (const room of this.rooms.values()) {
       if (room.whiteId === userId || room.blackId === userId) {

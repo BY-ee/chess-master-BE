@@ -96,6 +96,12 @@ export class GameController {
     }
   }
 
+  @Get('rooms/active')
+  @UseGuards(AuthGuard('jwt'))
+  async getMyActiveRooms(@Request() req: any) {
+    return this.gameService.getUserActiveRooms(req.user.id);
+  }
+
   @Get('rooms')
   @UseGuards(AuthGuard('jwt'))
   async getAvailableRooms() {
