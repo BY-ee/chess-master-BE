@@ -42,20 +42,26 @@ export class GameController {
     };
 
     if (saveGameDto.mode === 'ai') {
-        if (userColor === 'b') {
-            gameData.blackId = userId;
-            // whiteAiId would be linked here if we had AI model info
-        } else {
-            gameData.whiteId = userId;
-            // blackAiId would be linked here
+      if (userColor === 'b') {
+        gameData.blackId = userId;
+        // If user is Black, AI is White
+        if (saveGameDto.aiModelId) {
+           gameData.whiteAiId = saveGameDto.aiModelId;
         }
+      } else {
+        gameData.whiteId = userId;
+        // If user is White, AI is Black
+        if (saveGameDto.aiModelId) {
+           gameData.blackAiId = saveGameDto.aiModelId;
+        }
+      }
     } else {
-        // Fallback for generic modes - assumes user matches the requested color
-        if (userColor === 'b') {
-            gameData.blackId = userId;
-        } else {
-            gameData.whiteId = userId;
-        }
+      // Fallback for generic modes - assumes user matches the requested color
+      if (userColor === 'b') {
+        gameData.blackId = userId;
+      } else {
+        gameData.whiteId = userId;
+      }
     }
 
     return this.gameService.saveGameResult(gameData);

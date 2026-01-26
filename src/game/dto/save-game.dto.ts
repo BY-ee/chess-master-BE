@@ -21,4 +21,7 @@ export class SaveGameDto {
 
   @IsString()
   pgn: string;
+
+  @IsOptional()
+  aiModelId?: number;
 }

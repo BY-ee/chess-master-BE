@@ -13,6 +13,31 @@ export class GameService {
     });
   }
 
+  // Helper to update User vs AI stats
+  private async updateUserAiStats(userId: number, aiModelId: number, result: 'win' | 'loss' | 'draw') {
+    const stats = await this.prisma.userAiStats.upsert({
+      where: {
+        userId_aiModelId: {
+          userId,
+          aiModelId,
+        },
+      },
+      create: {
+        userId,
+        aiModelId,
+        wins: result === 'win' ? 1 : 0,
+        losses: result === 'loss' ? 1 : 0,
+        draws: result === 'draw' ? 1 : 0,
+      },
+      update: {
+        wins: result === 'win' ? { increment: 1 } : undefined,
+        losses: result === 'loss' ? { increment: 1 } : undefined,
+        draws: result === 'draw' ? { increment: 1 } : undefined,
+      },
+    });
+    return stats;
+  }
+
   async saveGameResult(data: {
     whiteId?: number;
     blackId?: number;
@@ -21,7 +46,8 @@ export class GameService {
     pgn: string;
     result: string;
   }) {
-    return this.prisma.game.create({
+    // 1. Save the game record
+    const game = await this.prisma.game.create({
       data: {
         white: data.whiteId ? { connect: { id: data.whiteId } } : undefined,
         black: data.blackId ? { connect: { id: data.blackId } } : undefined,
@@ -31,6 +57,29 @@ export class GameService {
         result: data.result,
       },
     });
+
+    // 2. Update Stats if it's a User vs AI game
+    // Case A: User is White, AI is Black
+    if (data.whiteId && data.blackAiId) {
+      // 1-0 = Win, 0-1 = Loss, 1/2-1/2 = Draw
+      let outcome: 'win' | 'loss' | 'draw' = 'draw';
+      if (data.result === '1-0') outcome = 'win';
+      else if (data.result === '0-1') outcome = 'loss';
+      
+      await this.updateUserAiStats(data.whiteId, data.blackAiId, outcome);
+    }
+    
+    // Case B: User is Black, AI is White
+    else if (data.blackId && data.whiteAiId) {
+       // 0-1 = Win (for Black), 1-0 = Loss
+       let outcome: 'win' | 'loss' | 'draw' = 'draw';
+       if (data.result === '0-1') outcome = 'win';
+       else if (data.result === '1-0') outcome = 'loss';
+
+       await this.updateUserAiStats(data.blackId, data.whiteAiId, outcome);
+    }
+
+    return game;
   }
 
   async getGamesByUserId(userId: number) {
