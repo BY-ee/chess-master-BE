@@ -7,37 +7,37 @@ async function main() {
     {
       name: 'Stockfish Level 1 (Beginner)',
       rating: 400,
-      type: 'stockfish',
+      type: 'defensive',
       config: { depth: 1, skillLevel: 0, moveOverhead: 1000 },
     },
     {
       name: 'Stockfish Level 3 (Novice)',
       rating: 800,
-      type: 'stockfish',
+      type: 'balanced',
       config: { depth: 3, skillLevel: 5, moveOverhead: 1000 },
     },
     {
       name: 'Stockfish Level 5 (Intermediate)',
       rating: 1200,
-      type: 'stockfish',
+      type: 'balanced',
       config: { depth: 5, skillLevel: 10, moveOverhead: 1000 },
     },
     {
       name: 'Stockfish Level 10 (Advanced)',
       rating: 1600,
-      type: 'stockfish',
+      type: 'balanced',
       config: { depth: 10, skillLevel: 15, moveOverhead: 1000 },
     },
     {
       name: 'Stockfish Level 15 (Master)',
       rating: 2000,
-      type: 'stockfish',
+      type: 'aggressive',
       config: { depth: 15, skillLevel: 20, moveOverhead: 1000 },
     },
     {
       name: 'Stockfish Max (Grandmaster)',
       rating: 2800,
-      type: 'stockfish',
+      type: 'aggressive',
       config: { depth: 20, skillLevel: 20, moveOverhead: 1000 },
     },
   ];
