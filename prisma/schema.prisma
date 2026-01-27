@@ -39,6 +39,7 @@ model AiModel {
   rating    Int      @default(1000)
   type      String   @default("stockfish")
   config    Json
+  description String   @default("")
   createdAt DateTime @default(now()) @map("created_at")
 
   gamesAsBlack Game[]        @relation("BlackAi")

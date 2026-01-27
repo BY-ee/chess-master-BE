@@ -5,39 +5,59 @@ const prisma = new PrismaClient();
 async function main() {
   const aiModels = [
     {
-      name: 'Stockfish Level 1 (Beginner)',
+      name: 'Rookie Ralph (Defensive)',
       rating: 400,
       type: 'defensive',
+      description: 'A cautious beginner who avoids risks but misses opportunities.',
       config: { depth: 1, skillLevel: 0, moveOverhead: 1000 },
     },
     {
-      name: 'Stockfish Level 3 (Novice)',
+      name: 'Careful Carla (Defensive)',
       rating: 800,
-      type: 'balanced',
+      type: 'defensive',
+      description: 'Plays solidly and waits for you to make a mistake.',
       config: { depth: 3, skillLevel: 5, moveOverhead: 1000 },
     },
     {
-      name: 'Stockfish Level 5 (Intermediate)',
+      name: 'Balanced Ben (Balanced)',
       rating: 1200,
       type: 'balanced',
+      description: 'An intermediate player with a well-rounded style.',
       config: { depth: 5, skillLevel: 10, moveOverhead: 1000 },
     },
     {
-      name: 'Stockfish Level 10 (Advanced)',
+      name: 'Aggressive Alex (Aggressive)',
+      rating: 1200,
+      type: 'aggressive',
+      description: 'Attacks relentlessly, often sacrificing material for initiative.',
+      config: { depth: 5, skillLevel: 10, moveOverhead: 1000 },
+    },
+    {
+      name: 'Strategic Sarah (Balanced)',
       rating: 1600,
       type: 'balanced',
+      description: 'Prefers long-term planning and positional play.',
       config: { depth: 10, skillLevel: 15, moveOverhead: 1000 },
     },
     {
-      name: 'Stockfish Level 15 (Master)',
+      name: 'Tactical Tom (Aggressive)',
+      rating: 1600,
+      type: 'aggressive',
+      description: 'Excels in complications and tactical skirmishes.',
+      config: { depth: 10, skillLevel: 15, moveOverhead: 1000 },
+    },
+    {
+      name: 'Master Mike (Aggressive)',
       rating: 2000,
       type: 'aggressive',
+      description: 'A master tactician who punishes every inaccurate move.',
       config: { depth: 15, skillLevel: 20, moveOverhead: 1000 },
     },
     {
-      name: 'Stockfish Max (Grandmaster)',
+      name: 'Grandmaster (Balanced)',
       rating: 2800,
-      type: 'aggressive',
+      type: 'balanced',
+      description: 'Near-perfect play. Good luck!',
       config: { depth: 20, skillLevel: 20, moveOverhead: 1000 },
     },
   ];
@@ -50,12 +70,14 @@ async function main() {
       update: {
         rating: model.rating,
         type: model.type,
+        description: model.description,
         config: model.config,
       },
       create: {
         name: model.name,
         rating: model.rating,
         type: model.type,
+        description: model.description,
         config: model.config,
       },
     });
