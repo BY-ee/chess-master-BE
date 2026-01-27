@@ -17,6 +17,7 @@ model User {
   gamesAsBlack  Game[]         @relation("BlackPlayer")
   gamesAsWhite  Game[]         @relation("WhitePlayer")
   refreshTokens RefreshToken[]
+  aiStats       UserAiStats[]
 
   @@map("users")
 }
@@ -33,15 +34,37 @@ model RefreshToken {
 }
 
 model AiModel {
-  id           Int      @id @default(autoincrement())
-  name         String   @unique
-  config       Json
-  createdAt    DateTime @default(now()) @map("created_at")
+  id        Int      @id @default(autoincrement())
+  name      String   @unique
+  rating    Int      @default(1000)
+  type      String   @default("stockfish")
+  config    Json
+  description String   @default("")
+  createdAt DateTime @default(now()) @map("created_at")
 
-  gamesAsBlack Game[]   @relation("BlackAi")
-  gamesAsWhite Game[]   @relation("WhiteAi")
+  gamesAsBlack Game[]        @relation("BlackAi")
+  gamesAsWhite Game[]        @relation("WhiteAi")
+  stats        UserAiStats[]
 
   @@map("ai_models")
+}
+
+model UserAiStats {
+  id        Int      @id @default(autoincrement())
+  userId    Int      @map("user_id")
+  aiModelId Int      @map("ai_model_id")
+  
+  wins      Int      @default(0)
+  losses    Int      @default(0)
+  draws     Int      @default(0)
+  
+  user      User     @relation(fields: [userId], references: [id])
+  aiModel   AiModel  @relation(fields: [aiModelId], references: [id])
+  
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([userId, aiModelId])
+  @@map("user_ai_stats")
 }
 
 model Game {

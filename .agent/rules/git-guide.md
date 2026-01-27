@@ -4,6 +4,7 @@ trigger: always_on
 
 # **개발이 시작/진행/완료될 때마다, 이하의 git branch convention과 git commit convention을 따라 항상 브랜치를 생성하고 커밋을 만들어야 합니다.**
 # Git-flow 방식을 활용하며, 커밋 방식은 `/git-flow-commit` 워크플로우를 따릅니다.
+# 줄바꿈은 `\n`이 아닌 enter 입력 등으로 커밋 메시지에 "\n" 문구가 추가되지 않고 실제 줄바꿈되도록 합니다.
 
 ## git branch convention은 Git-flow 전략을 따르도록 합니다.
 1. main: 운영 환경과 연동되는 브랜치 (**직접 commit & push 금지**, develop 브랜치만 활용하도록 함)
