@@ -1,10 +1,21 @@
-import { Controller, Post, Get, Body, UseGuards, Request, Param, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Controller, Post, Get, Body, UseGuards, Request, Param, UseFilters } from '@nestjs/common';
 import { GameService } from './game.service';
 import { SaveGameDto } from './dto/save-game.dto';
 import { CreateRoomDto } from './dto/create-room.dto';
 import { AuthGuard } from '@nestjs/passport';
+import { GameExceptionFilter } from './filters/game-exception.filter';
+
+interface GameResultData {
+  whiteId?: number;
+  blackId?: number;
+  whiteAiId?: number;
+  blackAiId?: number;
+  pgn: string;
+  result: string;
+}
 
 @Controller('games')
+@UseFilters(GameExceptionFilter)
 export class GameController {
   constructor(private readonly gameService: GameService) {}
 
@@ -36,31 +47,24 @@ export class GameController {
     }
 
     // Construct game data
-    const gameData: any = {
+    const gameData: GameResultData = {
       pgn: saveGameDto.pgn,
       result,
     };
 
-    if (saveGameDto.mode === 'ai') {
-      if (userColor === 'b') {
-        gameData.blackId = userId;
-        // If user is Black, AI is White
-        if (saveGameDto.aiModelId) {
-           gameData.whiteAiId = saveGameDto.aiModelId;
-        }
-      } else {
-        gameData.whiteId = userId;
-        // If user is White, AI is Black
-        if (saveGameDto.aiModelId) {
-           gameData.blackAiId = saveGameDto.aiModelId;
-        }
-      }
+    // Assign user to their color
+    if (userColor === 'b') {
+      gameData.blackId = userId;
     } else {
-      // Fallback for generic modes - assumes user matches the requested color
+      gameData.whiteId = userId;
+    }
+
+    // Assign AI opponent if in AI mode
+    if (saveGameDto.mode === 'ai' && saveGameDto.aiModelId) {
       if (userColor === 'b') {
-        gameData.blackId = userId;
+        gameData.whiteAiId = saveGameDto.aiModelId;
       } else {
-        gameData.whiteId = userId;
+        gameData.blackAiId = saveGameDto.aiModelId;
       }
     }
 
@@ -87,19 +91,11 @@ export class GameController {
   @Post('rooms/:roomId/join')
   @UseGuards(AuthGuard('jwt'))
   async joinRoom(@Request() req: any, @Param('roomId') roomId: string) {
-    try {
-      const room = this.gameService.joinRoom(
-        roomId,
-        req.user.id,
-        req.user.username,
-      );
-      return room;
-    } catch (error) {
-      if (error.message === 'Room not found') {
-        throw new NotFoundException(error.message);
-      }
-      throw new BadRequestException(error.message);
-    }
+    return this.gameService.joinRoom(
+      roomId,
+      req.user.id,
+      req.user.username,
+    );
   }
 
   @Get('rooms/active')

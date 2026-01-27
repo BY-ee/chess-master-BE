@@ -118,16 +118,7 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
         // Calculate remaining players
         // Since this user just disconnected, they are technically "gone".
         // Use fetchSockets to count remaining.
-        const sockets = await this.server.in(roomId).fetchSockets();
-        let playerCount = 0;
-        const connectedUserIds = new Set<number>();
-         for (const socket of sockets) {
-            const socketUserId = (socket.data as any).user?.id;
-             if (socketUserId) connectedUserIds.add(socketUserId);
-         }
-         
-         if (room.whiteId && connectedUserIds.has(room.whiteId)) playerCount++;
-         if (room.blackId && connectedUserIds.has(room.blackId)) playerCount++;
+        const { count: playerCount } = await this.calculateConnectedPlayers(roomId, room);
 
          this.server.to(roomId).emit('player_left', {
              userId,
@@ -145,7 +136,7 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
 
 
   @SubscribeMessage('join_game')
-  async handleJoinGame(client: AuthenticatedSocket, payload: { roomId: string; whiteId?: number; blackId?: number; whiteAiId?: number; blackAiId?: number }): Promise<string> {
+  async handleJoinGame(client: AuthenticatedSocket, payload: { roomId: string }): Promise<string> {
     const { roomId } = payload;
     
     // 1. Validate Room Existence via GameService
@@ -179,27 +170,8 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
       });
 
       // 4. Calculate Connected Players & Emit 'player_joined'
-      const sockets = await this.server.in(roomId).fetchSockets();
-      // Map sockets to user IDs
-      const connectedUserIds = new Set<number>();
-      
-      // Explicitly add current user (to ensure they are counted even if fetchSockets has a delay)
-      if (userId) {
-        connectedUserIds.add(userId);
-      }
-      
-      for (const socket of sockets) {
-        // cast to any to access data safely if type inference fails, though RemoteSocket has data
-        const socketUserId = (socket.data as any).user?.id;
-        if (socketUserId) {
-          connectedUserIds.add(socketUserId);
-        }
-      }
-
-      // Count how many "Players" (white/black) are actually connected
-      let playerCount = 0;
-      if (room.whiteId && connectedUserIds.has(room.whiteId)) playerCount++;
-      if (room.blackId && connectedUserIds.has(room.blackId)) playerCount++;
+      // 4. Calculate Connected Players & Emit 'player_joined'
+      const { count: playerCount, connectedIds: connectedUserIds } = await this.calculateConnectedPlayers(roomId, room, userId);
 
       // Broadcast player_joined to everyone in the room
       this.server.to(roomId).emit('player_joined', {
@@ -379,17 +351,8 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
         const room = this.gameService.getRoom(roomId);
         if (room) {
             // Calculate remaining players
-             const sockets = await this.server.in(roomId).fetchSockets();
-             let playerCount = 0;
-             const connectedUserIds = new Set<number>();
-             
-             for (const socket of sockets) {
-                const socketUserId = (socket.data as any).user?.id;
-                 if (socketUserId) connectedUserIds.add(socketUserId);
-             }
-             
-             if (room.whiteId && connectedUserIds.has(room.whiteId)) playerCount++;
-             if (room.blackId && connectedUserIds.has(room.blackId)) playerCount++;
+             // Calculate remaining players
+             const { count: playerCount } = await this.calculateConnectedPlayers(roomId, room);
 
             this.server.to(roomId).emit('player_left', {
                 userId: client.user.id,
@@ -400,5 +363,25 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
     }
     
     return 'Left room';
+  }
+
+  private async calculateConnectedPlayers(roomId: string, room: any, forceIncludeUserId?: number): Promise<{ count: number, connectedIds: Set<number> }> {
+    const sockets = await this.server.in(roomId).fetchSockets();
+    const connectedIds = new Set<number>();
+    
+    for (const socket of sockets) {
+      const socketUserId = (socket.data as any).user?.id;
+      if (socketUserId) connectedIds.add(socketUserId);
+    }
+    
+    if (forceIncludeUserId) {
+      connectedIds.add(forceIncludeUserId);
+    }
+
+    let count = 0;
+    if (room.whiteId && connectedIds.has(room.whiteId)) count++;
+    if (room.blackId && connectedIds.has(room.blackId)) count++;
+
+    return { count, connectedIds };
   }
 }

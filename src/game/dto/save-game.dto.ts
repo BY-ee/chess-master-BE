@@ -6,10 +6,6 @@ export class SaveGameDto {
   mode: string;
 
   @IsString()
-  @IsIn(['win', 'loss', 'draw'])
-  result: string;
-
-  @IsString()
   @IsOptional()
   @IsIn(['w', 'b'])
   winnerColor?: string;

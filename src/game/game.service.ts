@@ -3,6 +3,24 @@ import { PrismaService } from '../prisma/prisma.service';
 import { Prisma } from '@prisma/client';
 import { GameException, GameErrorCode } from './game.exception';
 
+export interface Room {
+  roomId: string;
+  roomName?: string;
+  hostId: number;
+  hostUsername: string;
+  guestId?: number;
+  guestUsername?: string;
+  status: 'waiting' | 'playing' | 'finished';
+  createdAt: Date;
+  whiteId?: number;
+  blackId?: number;
+  pgn: string;
+  finishedAt?: Date;
+  rematchRequestedBy?: number;
+  rematchExpiresAt?: Date;
+  cleanupTimer?: NodeJS.Timeout;
+}
+
 @Injectable()
 export class GameService {
   constructor(private prisma: PrismaService) {}
@@ -104,23 +122,7 @@ export class GameService {
 
   // In-memory room management (for MVP, can be moved to Redis later)
   // Extended to hold active game state
-  private rooms = new Map<string, {
-    roomId: string;
-    roomName?: string;
-    hostId: number;
-    hostUsername: string;
-    guestId?: number;
-    guestUsername?: string;
-    status: 'waiting' | 'playing' | 'finished';
-    createdAt: Date;
-    whiteId?: number;
-    blackId?: number;
-    pgn: string;
-    finishedAt?: Date;
-    rematchRequestedBy?: number;
-    rematchExpiresAt?: Date;
-    cleanupTimer?: NodeJS.Timeout;
-  }>();
+  private rooms = new Map<string, Room>();
 
   // Helper to clear timeout safely
   private clearCleanupTimer(roomId: string) {
