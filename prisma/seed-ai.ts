@@ -10,6 +10,7 @@ async function main() {
       type: 'defensive',
       description: 'A cautious beginner who avoids risks but misses opportunities.',
       config: { depth: 1, skillLevel: 0, moveOverhead: 1000 },
+      imageUrl: '/images/bots/rookie-ralph.png',
     },
     {
       name: 'Careful Carla (Defensive)',
@@ -17,6 +18,7 @@ async function main() {
       type: 'defensive',
       description: 'Plays solidly and waits for you to make a mistake.',
       config: { depth: 3, skillLevel: 5, moveOverhead: 1000 },
+      imageUrl: '/images/bots/careful-carla.png',
     },
     {
       name: 'Balanced Ben (Balanced)',
@@ -24,6 +26,7 @@ async function main() {
       type: 'balanced',
       description: 'An intermediate player with a well-rounded style.',
       config: { depth: 5, skillLevel: 10, moveOverhead: 1000 },
+      imageUrl: '/images/bots/balanced-ben.png',
     },
     {
       name: 'Aggressive Alex (Aggressive)',
@@ -31,6 +34,7 @@ async function main() {
       type: 'aggressive',
       description: 'Attacks relentlessly, often sacrificing material for initiative.',
       config: { depth: 5, skillLevel: 10, moveOverhead: 1000 },
+      imageUrl: '/images/bots/aggressive-alex.png',
     },
     {
       name: 'Strategic Sarah (Balanced)',
@@ -38,6 +42,7 @@ async function main() {
       type: 'balanced',
       description: 'Prefers long-term planning and positional play.',
       config: { depth: 10, skillLevel: 15, moveOverhead: 1000 },
+      imageUrl: '/images/bots/strategic-sarah.png',
     },
     {
       name: 'Tactical Tom (Aggressive)',
@@ -45,6 +50,7 @@ async function main() {
       type: 'aggressive',
       description: 'Excels in complications and tactical skirmishes.',
       config: { depth: 10, skillLevel: 15, moveOverhead: 1000 },
+      imageUrl: '/images/bots/tactical-tom.png',
     },
     {
       name: 'Master Mike (Aggressive)',
@@ -52,6 +58,7 @@ async function main() {
       type: 'aggressive',
       description: 'A master tactician who punishes every inaccurate move.',
       config: { depth: 15, skillLevel: 20, moveOverhead: 1000 },
+      imageUrl: '/images/bots/master-mike.png',
     },
     {
       name: 'Grandmaster (Balanced)',
@@ -59,6 +66,7 @@ async function main() {
       type: 'balanced',
       description: 'Near-perfect play. Good luck!',
       config: { depth: 20, skillLevel: 20, moveOverhead: 1000 },
+      imageUrl: '/images/bots/grandmaster.png',
     },
   ];
 
@@ -72,6 +80,7 @@ async function main() {
         type: model.type,
         description: model.description,
         config: model.config,
+        imageUrl: model.imageUrl,
       },
       create: {
         name: model.name,
@@ -79,6 +88,7 @@ async function main() {
         type: model.type,
         description: model.description,
         config: model.config,
+        imageUrl: model.imageUrl,
       },
     });
     console.log(`Upserted AI: ${ai.name} (Rating: ${ai.rating})`);

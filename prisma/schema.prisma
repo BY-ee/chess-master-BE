@@ -40,6 +40,7 @@ model AiModel {
   type      String   @default("stockfish")
   config    Json
   description String   @default("")
+  imageUrl    String   @default("")
   createdAt DateTime @default(now()) @map("created_at")
 
   gamesAsBlack Game[]        @relation("BlackAi")
