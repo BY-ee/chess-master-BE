@@ -161,6 +161,10 @@ export class GameService {
       blackId: undefined
     };
     this.rooms.set(roomId, room);
+    
+    // Auto-cleanup waiting room after 10 minutes (600 seconds) if no one joins
+    this.scheduleRoomCleanup(roomId, 600);
+    
     return room;
   }
 
@@ -182,6 +186,9 @@ export class GameService {
     room.guestId = guestId;
     room.guestUsername = guestUsername;
     room.status = 'playing';
+    
+    // Clear the waiting cleanup timer as the game is starting
+    this.clearCleanupTimer(roomId);
     
     // Assign colors (Host is already White)
     room.blackId = guestId;
