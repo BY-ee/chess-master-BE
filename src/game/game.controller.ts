@@ -1,7 +1,8 @@
-import { Controller, Post, Get, Body, UseGuards, Request, Param, UseFilters } from '@nestjs/common';
+import { Controller, Post, Get, Body, UseGuards, Request, Param, UseFilters, Query } from '@nestjs/common';
 import { GameService } from './game.service';
 import { SaveGameDto } from './dto/save-game.dto';
 import { CreateRoomDto } from './dto/create-room.dto';
+import { GetRoomsDto } from './dto/get-rooms.dto';
 import { AuthGuard } from '@nestjs/passport';
 import { GameExceptionFilter } from './filters/game-exception.filter';
 
@@ -106,7 +107,7 @@ export class GameController {
 
   @Get('rooms')
   @UseGuards(AuthGuard('jwt'))
-  async getAvailableRooms() {
-    return this.gameService.getAvailableRooms();
+  async getAvailableRooms(@Query() query: GetRoomsDto) {
+    return this.gameService.getAvailableRooms(query);
   }
 }

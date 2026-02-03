@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE "users" ADD COLUMN     "country" TEXT DEFAULT 'KR',
+ADD COLUMN     "rating" INTEGER NOT NULL DEFAULT 1200;

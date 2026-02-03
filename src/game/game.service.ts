@@ -19,6 +19,8 @@ export interface Room {
   rematchRequestedBy?: number;
   rematchExpiresAt?: Date;
   cleanupTimer?: NodeJS.Timeout;
+  hostRating?: number;
+  hostCountry?: string;
 }
 
 @Injectable()
@@ -147,13 +149,22 @@ export class GameService {
     room.cleanupTimer = timeout;
   }
 
-  createRoom(hostId: number, hostUsername: string, roomName?: string) {
+  async createRoom(hostId: number, hostUsername: string, roomName?: string) {
     const roomId = `room_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    
+    // Fetch user details for richer room metadata
+    const user = await this.prisma.user.findUnique({
+      where: { id: hostId },
+      select: { rating: true, country: true },
+    });
+
     const room: Room = {
       roomId,
       roomName: roomName || `${hostUsername}'s room`,
       hostId,
       hostUsername,
+      hostRating: user?.rating ?? 1200,
+      hostCountry: user?.country ?? 'KR',
       status: 'waiting',
       createdAt: new Date(),
       pgn: '',
@@ -199,15 +210,77 @@ export class GameService {
     return room;
   }
 
-  getAvailableRooms() {
-    return Array.from(this.rooms.values())
-      .filter(room => room.status === 'waiting')
-      .map(({ roomId, roomName, hostUsername, createdAt }) => ({
-        roomId,
-        roomName,
-        hostUsername,
-        createdAt,
-      }));
+  getAvailableRooms(query?: { 
+    search?: string; 
+    ratingMin?: number; 
+    ratingMax?: number; 
+    country?: string; 
+    limit?: number; 
+    cursor?: string 
+  }) {
+    let rooms = Array.from(this.rooms.values())
+      .filter(room => room.status === 'waiting');
+
+    // 1. Filtering
+    if (query?.search) {
+      const lowerSearch = query.search.toLowerCase();
+      rooms = rooms.filter(room => 
+        (room.roomName?.toLowerCase().includes(lowerSearch) || 
+         room.hostUsername.toLowerCase().includes(lowerSearch))
+      );
+    }
+
+    if (query?.country) {
+      rooms = rooms.filter(room => room.hostCountry === query.country);
+    }
+
+    if (query?.ratingMin !== undefined) {
+      rooms = rooms.filter(room => (room.hostRating ?? 0) >= query.ratingMin!);
+    }
+
+    if (query?.ratingMax !== undefined) {
+      rooms = rooms.filter(room => (room.hostRating ?? 0) <= query.ratingMax!);
+    }
+
+    // 2. Sorting (Newest first)
+    rooms.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+
+    // 3. Pagination (Cursor-based)
+    const limit = query?.limit ?? 10;
+    let paginatedRooms = rooms;
+    let nextCursor: string | null = null;
+
+    if (query?.cursor) {
+      const cursorIndex = rooms.findIndex(r => r.roomId === query.cursor);
+      if (cursorIndex !== -1) {
+        // Start AFTER the cursor
+        paginatedRooms = rooms.slice(cursorIndex + 1);
+      }
+    }
+
+    // Slice to limit
+    if (paginatedRooms.length > limit) {
+      nextCursor = paginatedRooms[limit].roomId;
+      paginatedRooms = paginatedRooms.slice(0, limit);
+    } else {
+      nextCursor = null;
+    }
+
+    // 4. Map to DTO
+    const data = paginatedRooms.map(({ roomId, roomName, hostUsername, hostRating, hostCountry, createdAt }) => ({
+      roomId,
+      roomName,
+      hostUsername,
+      hostRating,
+      hostCountry,
+      createdAt,
+    }));
+
+    return {
+      data,
+      nextCursor,
+      total: rooms.length // Optional: Total matching count
+    };
   }
 
   getUserActiveRooms(userId: number) {
