@@ -165,7 +165,9 @@ export class GameService {
     // Auto-cleanup waiting room after 10 minutes (600 seconds) if no one joins
     this.scheduleRoomCleanup(roomId, 600);
     
-    return room;
+    // Return room data without the timeout object to avoid circular reference in JSON
+    const { cleanupTimer, ...roomData } = room;
+    return roomData;
   }
 
   joinRoom(roomId: string, guestId: number, guestUsername: string) {
