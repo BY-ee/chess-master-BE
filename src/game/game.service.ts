@@ -149,15 +149,15 @@ export class GameService {
 
   createRoom(hostId: number, hostUsername: string, roomName?: string) {
     const roomId = `room_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    const room = {
+    const room: Room = {
       roomId,
       roomName: roomName || `${hostUsername}'s room`,
       hostId,
       hostUsername,
-      status: 'waiting' as const,
+      status: 'waiting',
       createdAt: new Date(),
       pgn: '',
-      whiteId: hostId, // Assign Host as White immediately
+      whiteId: hostId,
       blackId: undefined
     };
     this.rooms.set(roomId, room);
