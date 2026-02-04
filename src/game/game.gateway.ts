@@ -2,7 +2,7 @@ import { SubscribeMessage, WebSocketGateway, OnGatewayInit, OnGatewayConnection,
 import { Socket, Server } from 'socket.io';
 import { GameService } from './game.service';
 import { JwtService } from '@nestjs/jwt';
-import { UnauthorizedException } from '@nestjs/common';
+import { UnauthorizedException, Inject, forwardRef } from '@nestjs/common';
 import { GameException } from './game.exception';
 
 interface GameState {
@@ -26,7 +26,7 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
   private onlineUsers = new Set<number>(); // Track unique user IDs
 
   constructor(
-    private readonly gameService: GameService,
+    @Inject(forwardRef(() => GameService)) private readonly gameService: GameService,
     private readonly jwtService: JwtService,
   ) {}
 
@@ -363,6 +363,21 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
     }
     
     return 'Left room';
+  }
+
+  notifyRoomCreated(room: any) {
+    this.server.emit('room_created', room);
+  }
+
+  notifyRoomDeleted(roomId: string) {
+    this.server.emit('room_deleted', { roomId });
+  }
+
+  notifyRoomExpired(roomId: string) {
+    this.server.to(roomId).emit('error', {
+      code: 'ROOM_EXPIRED',
+      message: 'The room has expired due to inactivity.',
+    });
   }
 
   private async calculateConnectedPlayers(roomId: string, room: any, forceIncludeUserId?: number): Promise<{ count: number, connectedIds: Set<number> }> {

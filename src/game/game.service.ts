@@ -1,7 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Inject, forwardRef } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma } from '@prisma/client';
 import { GameException, GameErrorCode } from './game.exception';
+import { GameGateway } from './game.gateway';
 
 export interface Room {
   roomId: string;
@@ -25,7 +26,10 @@ export interface Room {
 
 @Injectable()
 export class GameService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    @Inject(forwardRef(() => GameGateway)) private gameGateway: GameGateway,
+  ) {}
 
   async createGame(data: Prisma.GameCreateInput) {
     return this.prisma.game.create({
@@ -143,6 +147,8 @@ export class GameService {
 
     const timeout = setTimeout(() => {
       console.log(`Auto-deleting room ${roomId} after ${seconds}s`);
+      // Notify connected clients that room is expiring
+      this.gameGateway.notifyRoomExpired(roomId);
       this.deleteRoom(roomId);
     }, seconds * 1000);
 
@@ -150,6 +156,15 @@ export class GameService {
   }
 
   async createRoom(hostId: number, hostUsername: string, roomName?: string) {
+    const finalRoomName = roomName || `${hostUsername}'s room`;
+
+    // Check for duplicate room name (Case-insensitive)
+    for (const existingRoom of this.rooms.values()) {
+      if (existingRoom.roomName && existingRoom.roomName.toLowerCase() === finalRoomName.toLowerCase()) {
+        throw new GameException(GameErrorCode.ROOM_NAME_CONFLICT, 'Room name already exists');
+      }
+    }
+
     const roomId = `room_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     
     // Fetch user details for richer room metadata
@@ -160,7 +175,7 @@ export class GameService {
 
     const room: Room = {
       roomId,
-      roomName: roomName || `${hostUsername}'s room`,
+      roomName: finalRoomName,
       hostId,
       hostUsername,
       hostRating: user?.rating ?? 1200,
@@ -178,6 +193,10 @@ export class GameService {
     
     // Return room data without the timeout object to avoid circular reference in JSON
     const { cleanupTimer, ...roomData } = room;
+    
+    // Broadcast room creation to lobby
+    this.gameGateway.notifyRoomCreated(roomData);
+    
     return roomData;
   }
 
@@ -314,6 +333,7 @@ export class GameService {
   deleteRoom(roomId: string) {
     this.clearCleanupTimer(roomId);
     this.rooms.delete(roomId);
+    this.gameGateway.notifyRoomDeleted(roomId);
   }
 
   requestRematch(roomId: string, userId: number) {
