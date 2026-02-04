@@ -51,20 +51,20 @@ description: 현재 작업의 목표, 진행 상황, 기술적 결정 사항 등
 6. **Write Knowledge (도메인 지식 갱신)**
   - `/contexts-space` 하위에서 `knowledge` 디렉토리를 찾아 `KNOWLEDGE.md` 파일 경로를 파악하세요.
     - (없다면 `/contexts-space/{프로젝트명}/knowledge/` 경로에 생성)
-  - **[Scope Limit]** 본인의 담당 영역(BE)에 해당하는 내용(프레임워크 버전, API 스펙 등)이 변경되었을 때만 해당 섹션을 수정하십시오. 다른 영역은 건드리지 마십시오.
+  - **[Scope Limit]** 본인의 담당 영역(FE)에 해당하는 내용(프레임워크 버전, API 스펙 등)이 변경되었을 때만 해당 섹션을 수정하십시오. 다른 영역은 건드리지 마십시오.
   - 포맷 예시:
     ```markdown
-    # BE Content
+    # FE Content
     ## 📝 Tech Stack Info
     ...
     ## 🎯 Domain Logic Rules
     ...
     ```
 
-7. **Final Review (완료 보고)**
-  - 저장이 완료되면 사용자에게 "컨텍스트 공유 파일이 업데이트되었음"을 알리고, 특히 `Have To Know` 항목을 요약해 주세요.
-
-8. **Update Global Recent Log (최근 작업 위치 기록)**
-   - `/contexts-space/chess-master/RECENT_LOG.md` 파일을 읽거나 생성하세요.
+7. **Update Global Recent Log (최근 작업 위치 기록)**
+   - `/contexts-space/chess-master/RECENT_LOG.md` 파일이 없으면 새로 작성하고, 있다면 최상단에 새로운 경로 로그를 기록하세요.
    - 방금 수정한 컨텍스트 파일의 **경로**와 **기능명**을 최상단에 기록하세요.
    - 포맷: `- [YYYY-MM-DD HH:mm] {작업내용} | Path: {파일경로}`
+
+8. **Final Review (완료 보고)**
+  - 저장이 완료되면 사용자에게 "컨텍스트 공유 파일이 업데이트되었음"을 알리고, 특히 `Have To Know` 항목을 요약해 주세요.
