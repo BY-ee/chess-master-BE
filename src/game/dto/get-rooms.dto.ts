@@ -1,4 +1,5 @@
-import { IsOptional, IsString, IsInt, Min, Max } from 'class-validator';
+import { IsOptional, IsString, IsInt, Min, Max, Validate } from 'class-validator';
+import { IsGreaterThanOrEqualConstraint } from './validators';
 import { Type } from 'class-transformer';
 
 export class GetRoomsDto {
@@ -16,6 +17,7 @@ export class GetRoomsDto {
   @Type(() => Number)
   @IsInt()
   @Min(0)
+  @Validate(IsGreaterThanOrEqualConstraint, ['ratingMin'])
   ratingMax?: number;
 
   @IsOptional()
