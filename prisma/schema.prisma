@@ -12,6 +12,8 @@ model User {
   email         String         @unique
   username      String         @unique
   password      String
+  rating        Int            @default(1200)
+  country       String?        @default("KR") // ISO 3166-1 alpha-2
   createdAt     DateTime       @default(now()) @map("created_at")
 
   gamesAsBlack  Game[]         @relation("BlackPlayer")

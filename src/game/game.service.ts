@@ -1,7 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Inject, forwardRef } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma } from '@prisma/client';
 import { GameException, GameErrorCode } from './game.exception';
+import { GameGateway } from './game.gateway';
 
 export interface Room {
   roomId: string;
@@ -19,11 +20,16 @@ export interface Room {
   rematchRequestedBy?: number;
   rematchExpiresAt?: Date;
   cleanupTimer?: NodeJS.Timeout;
+  hostRating: number;
+  hostCountry: string;
 }
 
 @Injectable()
 export class GameService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    @Inject(forwardRef(() => GameGateway)) private gameGateway: GameGateway,
+  ) {}
 
   async createGame(data: Prisma.GameCreateInput) {
     return this.prisma.game.create({
@@ -123,6 +129,7 @@ export class GameService {
   // In-memory room management (for MVP, can be moved to Redis later)
   // Extended to hold active game state
   private rooms = new Map<string, Room>();
+  private activeRoomNames = new Set<string>(); // Optimized O(1) name lookup
 
   // Helper to clear timeout safely
   private clearCleanupTimer(roomId: string) {
@@ -141,27 +148,56 @@ export class GameService {
 
     const timeout = setTimeout(() => {
       console.log(`Auto-deleting room ${roomId} after ${seconds}s`);
+      // Notify connected clients that room is expiring
+      this.gameGateway.notifyRoomExpired(roomId);
       this.deleteRoom(roomId);
     }, seconds * 1000);
 
     room.cleanupTimer = timeout;
   }
 
-  createRoom(hostId: number, hostUsername: string, roomName?: string) {
+  async createRoom(hostId: number, hostUsername: string, roomName?: string) {
+    const finalRoomName = roomName?.trim() || `${hostUsername}'s room`;
+
+    // Check for duplicate room name (Case-insensitive) O(1)
+    if (this.activeRoomNames.has(finalRoomName.toLowerCase())) {
+      throw new GameException(GameErrorCode.ROOM_NAME_CONFLICT, 'Room name already exists');
+    }
+
     const roomId = `room_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    const room = {
+    
+    // Fetch user details for richer room metadata
+    const user = await this.prisma.user.findUnique({
+      where: { id: hostId },
+      select: { rating: true, country: true },
+    });
+
+    const room: Room = {
       roomId,
-      roomName: roomName || `${hostUsername}'s room`,
+      roomName: finalRoomName,
       hostId,
       hostUsername,
-      status: 'waiting' as const,
+      hostRating: user?.rating ?? 1200,
+      hostCountry: user?.country ?? 'KR',
+      status: 'waiting',
       createdAt: new Date(),
       pgn: '',
-      whiteId: hostId, // Assign Host as White immediately
+      whiteId: hostId,
       blackId: undefined
     };
     this.rooms.set(roomId, room);
-    return room;
+    this.activeRoomNames.add(finalRoomName.toLowerCase());
+    
+    // Auto-cleanup waiting room after 10 minutes (600 seconds) if no one joins
+    this.scheduleRoomCleanup(roomId, 600);
+    
+    // Return room data without the timeout object to avoid circular reference in JSON
+    const { cleanupTimer, ...roomData } = room;
+    
+    // Broadcast room creation to lobby
+    this.gameGateway.notifyRoomCreated(roomData);
+    
+    return roomData;
   }
 
   joinRoom(roomId: string, guestId: number, guestUsername: string) {
@@ -183,6 +219,9 @@ export class GameService {
     room.guestUsername = guestUsername;
     room.status = 'playing';
     
+    // Clear the waiting cleanup timer as the game is starting
+    this.clearCleanupTimer(roomId);
+    
     // Assign colors (Host is already White)
     room.blackId = guestId;
     
@@ -190,15 +229,84 @@ export class GameService {
     return room;
   }
 
-  getAvailableRooms() {
-    return Array.from(this.rooms.values())
-      .filter(room => room.status === 'waiting')
-      .map(({ roomId, roomName, hostUsername, createdAt }) => ({
-        roomId,
-        roomName,
-        hostUsername,
-        createdAt,
-      }));
+  getAvailableRooms(query?: { 
+    search?: string; 
+    ratingMin?: number; 
+    ratingMax?: number; 
+    country?: string; 
+    limit?: number; 
+    cursor?: string 
+  }) {
+    let rooms = Array.from(this.rooms.values())
+      .filter(room => room.status === 'waiting');
+
+    // 1. Filtering
+    if (query?.search) {
+      const lowerSearch = query.search.toLowerCase();
+      rooms = rooms.filter(room => 
+        (room.roomName?.toLowerCase().includes(lowerSearch) || 
+         room.hostUsername.toLowerCase().includes(lowerSearch))
+      );
+    }
+
+    if (query?.country) {
+      rooms = rooms.filter(room => room.hostCountry === query.country);
+    }
+
+    if (query?.ratingMin !== undefined) {
+      rooms = rooms.filter(room => room.hostRating >= query.ratingMin!);
+    }
+
+    if (query?.ratingMax !== undefined) {
+      rooms = rooms.filter(room => room.hostRating <= query.ratingMax!);
+    }
+
+    // 2. Sorting (Newest first)
+    rooms.sort((a, b) => {
+      const timeDiff = b.createdAt.getTime() - a.createdAt.getTime();
+      if (timeDiff !== 0) return timeDiff;
+      // Secondary sort by roomId for stability
+      return a.roomId.localeCompare(b.roomId);
+    });
+
+    // 3. Pagination (Cursor-based)
+    const limit = query?.limit ?? 10;
+    let paginatedRooms = rooms;
+    let nextCursor: string | null = null;
+
+    if (query?.cursor) {
+      const cursorIndex = rooms.findIndex(r => r.roomId === query.cursor);
+      if (cursorIndex !== -1) {
+        // Start AFTER the cursor
+        paginatedRooms = rooms.slice(cursorIndex + 1);
+      }
+    }
+
+    // Slice to limit
+    if (paginatedRooms.length > limit) {
+      // Fix: Cursor should point to the LAST item of the CURRENT page (index limit-1)
+      // So that the next request starts AFTER it (index limit).
+      nextCursor = paginatedRooms[limit - 1].roomId;
+      paginatedRooms = paginatedRooms.slice(0, limit);
+    } else {
+      nextCursor = null;
+    }
+
+    // 4. Map to DTO
+    const data = paginatedRooms.map(({ roomId, roomName, hostUsername, hostRating, hostCountry, createdAt }) => ({
+      roomId,
+      roomName,
+      hostUsername,
+      hostRating,
+      hostCountry,
+      createdAt,
+    }));
+
+    return {
+      data,
+      nextCursor,
+      total: rooms.length // Optional: Total matching count
+    };
   }
 
   getUserActiveRooms(userId: number) {
@@ -231,7 +339,14 @@ export class GameService {
 
   deleteRoom(roomId: string) {
     this.clearCleanupTimer(roomId);
+    
+    const room = this.rooms.get(roomId);
+    if (room && room.roomName) {
+      this.activeRoomNames.delete(room.roomName.toLowerCase());
+    }
+
     this.rooms.delete(roomId);
+    this.gameGateway.notifyRoomDeleted(roomId);
   }
 
   requestRematch(roomId: string, userId: number) {

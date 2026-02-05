@@ -8,6 +8,7 @@ export enum GameErrorCode {
   INVALID_ACTION = 'INVALID_ACTION', // Joining own room, accepting own request
   GENERIC_ERROR = 'GENERIC_ERROR',
   UNAUTHORIZED = 'UNAUTHORIZED',
+  ROOM_NAME_CONFLICT = 'ROOM_NAME_CONFLICT',
 }
 
 export class GameException extends Error {

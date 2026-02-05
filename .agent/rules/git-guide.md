@@ -2,41 +2,41 @@
 trigger: always_on
 ---
 
-# **개발이 시작/진행/완료될 때마다, 이하의 git branch convention과 git commit convention을 따라 항상 브랜치를 생성하고 커밋을 만들어야 합니다.**
-# Git-flow 방식을 활용하며, 커밋 방식은 `/git-flow-commit` 워크플로우를 따릅니다.
-# 줄바꿈은 `\n`이 아닌 enter 입력 등으로 커밋 메시지에 "\n" 문구가 추가되지 않고 실제 줄바꿈되도록 합니다.
+# Git Guide & Convention
+**모든 개발 작업 시 아래의 Branch 및 Commit 규칙을 엄격히 준수해야 합니다.**
 
-## git branch convention은 Git-flow 전략을 따르도록 합니다.
-1. main: 운영 환경과 연동되는 브랜치 (**직접 commit & push 금지**, develop 브랜치만 활용하도록 함)
-2. develop: 개발 환경과 연동되는 브랜치 (**직접 commit & push 금지**)
-3. feat/*: 각 기능을 개발할 때 사용되는 브랜치
-4. fix/*: 버그를 수정할 때 사용되는 브랜치
-5. hotfix/*: 긴급 수정이 필요할 때 사용되는 브랜치 (긴급한 수정건이 아닌 경우 fix 브랜치를 주로 활용하도록 함)
+## 1. 🌿 Git Branch Strategy (Git-flow)
+- **main:** 운영 배포용 (**직접 Commit/Push 절대 금지**)
+- **develop:** 차기 개발버전 통합용 (**직접 Commit/Push 금지**, Merge Request로만 통합)
+- **feat/{name}:** 기능 개발용 (예: `feat/user-login`)
+- **fix/{name}:** 버그 수정용 (예: `fix/token-error`)
+- **hotfix/{name}:** 운영 긴급 수정용
 
-## git commit convention은 해당 convention을 따라 메시지를 작성하도록 합니다.
-<Header> (<Type>: <Subject>)
-<Content>
-<Footer>
+### [중요] 브랜치 생성 규칙
+1. 브랜치명은 **소문자**와 **하이픈(-)**만을 사용하는 **Kebab Case**를 따릅니다.
+2. 기능 개발 시작 전, 반드시 `develop` 브랜치에서 `git pull`을 수행하여 최신 상태를 동기화한 후 브랜치를 생성하십시오.
 
-1. Type: 해당 커밋의 작업 구분 (Header의 접두사)
-- feat → 새로운 기능을 추가한 경우 사용
-- add → 코드, 테스트, 예제, 문서 등을 추가한 경우 사용
-- fix → 버그를 수정한 경우 사용
-- update → 프로젝트의 버전이 업데이트된 경우 사용
-- refactor → 코드/구조가 리팩토링된 경우 사용
-- test → 테스트 코드가 수정된 경우 사용
-- docs → 문서가 수정된 경우 사용
-- chore → 이외의 사소한 수정건
-- revert → 커밋 혹은 변경사항을 되돌린 경우 사용
+## 2. 💬 Git Commit Convention
+커밋 메시지는 다음 템플릿을 따릅니다. 메시지 언어는 **한국어**를 사용합니다.
+```
+<Type>: <Subject>  (최대 50자)
+<Content>          (선택사항, 어떻게/왜 변경했는지 상세 설명)
+<Footer>           (선택사항, 이슈 트래킹 ID 등)
+```
 
-ex)
-feat: 어떤 좋은 기능에 대한 개발
+### Type (Header 접두사)
+- feat: 새로운 기능 추가
+- fix: 버그 수정
+- refactor: 기능 변경 없는 코드 구조 개선
+- style: 코드 포맷팅, 세미콜론 누락 등 (비즈니스 로직 변경 없음)
+- docs: 문서 수정
+- test: 테스트 코드 추가/수정
+- chore: 빌드 설정, 패키지 매니저 설정 등
+- revert: 커밋 되돌리기
 
-2. Content: 해당 커밋을 상세하게 설명하는 본문 (Type과 Subject로 충분히 설명 가능한 경우 생략 가능)
-ex)
-- 구체적으로 이런 기능을 개발
-- 해당 기능에 대한 개선 및 테스트 완료
+### 작성 예시
+- `git commit -m "feat: 사용자 로그인 API 구현" -m "JWT 토큰 발급 로직 추가 및 Redis 연동 완료" -m "Resolves: #101"`
 
-3. Footer: 어떤 이슈에서 온 커밋인지, 이슈 발생인지, 혹은 해결인지 등의 참조 정보
-ex)
-Resolves: #1234
+[Agent Action Guide]
+복잡한 변경 사항은 한 번에 커밋하지 말고, 논리적 단위로 쪼개서(Atomic Commit) 여러 번 커밋하십시오.
+커밋 메시지 작성 시 -m 옵션을 여러 번 사용하여 제목과 본문을 분리하는 방식을 권장합니다.

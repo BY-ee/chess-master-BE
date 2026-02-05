@@ -22,6 +22,9 @@ export class GameExceptionFilter implements ExceptionFilter {
       case GameErrorCode.ROOM_NOT_AVAILABLE:
         status = HttpStatus.BAD_REQUEST;
         break;
+      case GameErrorCode.ROOM_NAME_CONFLICT:
+        status = HttpStatus.CONFLICT;
+        break;
       default:
         status = HttpStatus.BAD_REQUEST;
         break;
