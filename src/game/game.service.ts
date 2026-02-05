@@ -486,7 +486,7 @@ export class GameService {
     this.matchmakingTimeouts.set(userId, timeout);
 
     // Try to find a match immediately
-    const match = this.tryToMatch(userId);
+    const match = await this.tryToMatch(userId);
 
     return {
       queuePosition: this.matchmakingQueue.findIndex(p => p.userId === userId) + 1,
@@ -528,7 +528,7 @@ export class GameService {
    * @param userId User ID
    * @returns Match data if found, null otherwise
    */
-  private tryToMatch(userId: number): { roomId: string; opponentId: number } | null {
+  private async tryToMatch(userId: number): Promise<{ roomId: string; opponentId: number } | null> {
     const playerIndex = this.matchmakingQueue.findIndex(p => p.userId === userId);
     if (playerIndex === -1) return null;
 
@@ -563,7 +563,7 @@ export class GameService {
           : [opponent, player];
 
         // Create room automatically
-        const room = this.createRoom(whitePlayer.userId, whitePlayer.username, `${whitePlayer.username} vs ${blackPlayer.username}`);
+        const room = await this.createRoom(whitePlayer.userId, whitePlayer.username, `${whitePlayer.username} vs ${blackPlayer.username}`);
         
         // Immediately assign both players
         room.guestId = blackPlayer.userId;
