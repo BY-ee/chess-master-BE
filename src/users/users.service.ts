@@ -8,7 +8,7 @@ import * as bcrypt from 'bcrypt';
 export class UsersService {
   constructor(private prisma: PrismaService) {}
 
-  async create(data: SignupDto): Promise<User> {
+  async create(data: SignupDto, verificationToken: string): Promise<User> {
     const salt = await bcrypt.genSalt();
     const hashedPassword = await bcrypt.hash(data.password, salt);
     
@@ -16,7 +16,9 @@ export class UsersService {
       return await this.prisma.user.create({ 
         data: {
           ...data,
-          password: hashedPassword
+          password: hashedPassword,
+          verificationToken,
+          isVerified: false,
         } 
       });
     } catch (error) {
@@ -33,6 +35,17 @@ export class UsersService {
 
   async findById(id: number): Promise<User | null> {
     return this.prisma.user.findUnique({ where: { id } });
+  }
+
+  async findByVerificationToken(token: string): Promise<User | null> {
+    return this.prisma.user.findFirst({ where: { verificationToken: token } });
+  }
+
+  async markEmailAsVerified(userId: number): Promise<User> {
+    return this.prisma.user.update({
+      where: { id: userId },
+      data: { isVerified: true, verificationToken: null },
+    });
   }
 
   async findAll(): Promise<User[]> {

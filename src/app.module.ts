@@ -8,6 +8,7 @@ import { GameModule } from './game/game.module';
 import { RecordsModule } from './records/records.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { AiModule } from './ai/ai.module';
+import { MailModule } from './mail/mail.module';
 
 @Module({
   imports: [
@@ -17,7 +18,8 @@ import { AiModule } from './ai/ai.module';
     GameModule, 
     RecordsModule, 
     PrismaModule,
-    AiModule
+    AiModule,
+    MailModule
   ],
   controllers: [AppController],
   providers: [AppService],

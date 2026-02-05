@@ -14,6 +14,8 @@ model User {
   password      String
   rating        Int            @default(1200)
   country       String?        @default("KR") // ISO 3166-1 alpha-2
+  isVerified    Boolean        @default(false) @map("is_verified")
+  verificationToken String?    @map("verification_token")
   createdAt     DateTime       @default(now()) @map("created_at")
 
   gamesAsBlack  Game[]         @relation("BlackPlayer")
