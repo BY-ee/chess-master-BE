@@ -262,7 +262,12 @@ export class GameService {
     }
 
     // 2. Sorting (Newest first)
-    rooms.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    rooms.sort((a, b) => {
+      const timeDiff = b.createdAt.getTime() - a.createdAt.getTime();
+      if (timeDiff !== 0) return timeDiff;
+      // Secondary sort by roomId for stability
+      return a.roomId.localeCompare(b.roomId);
+    });
 
     // 3. Pagination (Cursor-based)
     const limit = query?.limit ?? 10;
@@ -279,7 +284,9 @@ export class GameService {
 
     // Slice to limit
     if (paginatedRooms.length > limit) {
-      nextCursor = paginatedRooms[limit].roomId;
+      // Fix: Cursor should point to the LAST item of the CURRENT page (index limit-1)
+      // So that the next request starts AFTER it (index limit).
+      nextCursor = paginatedRooms[limit - 1].roomId;
       paginatedRooms = paginatedRooms.slice(0, limit);
     } else {
       nextCursor = null;
