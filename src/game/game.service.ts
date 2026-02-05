@@ -156,7 +156,7 @@ export class GameService {
   }
 
   async createRoom(hostId: number, hostUsername: string, roomName?: string) {
-    const finalRoomName = roomName || `${hostUsername}'s room`;
+    const finalRoomName = roomName?.trim() || `${hostUsername}'s room`;
 
     // Check for duplicate room name (Case-insensitive)
     for (const existingRoom of this.rooms.values()) {
