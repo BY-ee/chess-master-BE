@@ -129,6 +129,7 @@ export class GameService {
   // In-memory room management (for MVP, can be moved to Redis later)
   // Extended to hold active game state
   private rooms = new Map<string, Room>();
+  private activeRoomNames = new Set<string>(); // Optimized O(1) name lookup
 
   // Helper to clear timeout safely
   private clearCleanupTimer(roomId: string) {
@@ -158,11 +159,9 @@ export class GameService {
   async createRoom(hostId: number, hostUsername: string, roomName?: string) {
     const finalRoomName = roomName?.trim() || `${hostUsername}'s room`;
 
-    // Check for duplicate room name (Case-insensitive)
-    for (const existingRoom of this.rooms.values()) {
-      if (existingRoom.roomName && existingRoom.roomName.toLowerCase() === finalRoomName.toLowerCase()) {
-        throw new GameException(GameErrorCode.ROOM_NAME_CONFLICT, 'Room name already exists');
-      }
+    // Check for duplicate room name (Case-insensitive) O(1)
+    if (this.activeRoomNames.has(finalRoomName.toLowerCase())) {
+      throw new GameException(GameErrorCode.ROOM_NAME_CONFLICT, 'Room name already exists');
     }
 
     const roomId = `room_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -187,6 +186,7 @@ export class GameService {
       blackId: undefined
     };
     this.rooms.set(roomId, room);
+    this.activeRoomNames.add(finalRoomName.toLowerCase());
     
     // Auto-cleanup waiting room after 10 minutes (600 seconds) if no one joins
     this.scheduleRoomCleanup(roomId, 600);
@@ -339,6 +339,12 @@ export class GameService {
 
   deleteRoom(roomId: string) {
     this.clearCleanupTimer(roomId);
+    
+    const room = this.rooms.get(roomId);
+    if (room && room.roomName) {
+      this.activeRoomNames.delete(room.roomName.toLowerCase());
+    }
+
     this.rooms.delete(roomId);
     this.gameGateway.notifyRoomDeleted(roomId);
   }
