@@ -345,12 +345,20 @@ export class GameService {
   }
 
   findRoomByUserId(userId: number) {
+    let latestActiveRoom: Room | undefined;
+    let latestFinishedRoom: Room | undefined;
+    
     for (const room of this.rooms.values()) {
       if (room.whiteId === userId || room.blackId === userId) {
-        return room;
+        if (room.status === 'playing' || room.status === 'waiting') {
+          latestActiveRoom = room; // Update to the most recent active room
+        } else if (room.status === 'finished') {
+          latestFinishedRoom = room; // Update to the most recent finished room
+        }
       }
     }
-    return undefined;
+    
+    return latestActiveRoom || latestFinishedRoom;
   }
 
   getRoom(roomId: string) {
@@ -563,7 +571,9 @@ export class GameService {
           : [opponent, player];
 
         // Create room automatically
-        const room = await this.createRoom(whitePlayer.userId, whitePlayer.username, `${whitePlayer.username} vs ${blackPlayer.username}`);
+        // Append timestamp to ensure uniqueness if players match again quickly (before old room cleanup)
+        const roomName = `Match: ${whitePlayer.username} vs ${blackPlayer.username} (${Date.now()})`;
+        const room = await this.createRoom(whitePlayer.userId, whitePlayer.username, roomName);
         
         // Immediately assign both players
         room.guestId = blackPlayer.userId;
