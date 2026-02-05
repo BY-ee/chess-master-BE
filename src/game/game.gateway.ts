@@ -75,6 +75,15 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
     // Remove user from online set
     if (userId) {
       this.onlineUsers.delete(userId);
+
+      // Remove from matchmaking queue if present
+      this.gameService.leaveMatchmaking(userId);
+
+      // Clear matchmaking update interval if exists
+      const updateInterval = (client as any).matchmakingUpdateInterval;
+      if (updateInterval) {
+        clearInterval(updateInterval);
+      }
     }
     
     console.log(`Client disconnected: ${client.id} (User: ${username})`);
@@ -406,5 +415,110 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
     if (room.blackId && connectedIds.has(room.blackId)) count++;
 
     return { count, connectedIds };
+  }
+
+  // ==================== Matchmaking System ====================
+
+  @SubscribeMessage('matchmaking_join')
+  async handleMatchmakingJoin(client: AuthenticatedSocket): Promise<string> {
+    if (!client.user) {
+      client.emit('error', { code: 'UNAUTHORIZED', message: 'Not authenticated' });
+      return 'Unauthorized';
+    }
+
+    const userId = client.user.id;
+    const username = client.user.username;
+
+    try {
+      // Join matchmaking queue
+      const result = await this.gameService.joinMatchmaking(userId, username);
+
+      console.log(`Matchmaking join result for ${username}:`, result);
+
+      // If immediately matched
+      if (result.matched && result.matchData) {
+        const { roomId, opponentId } = result.matchData;
+
+        // Emit match found to BOTH players
+        // Find opponent's socket
+        const allSockets = await this.server.fetchSockets();
+        const opponentSocket = allSockets.find(s => (s.data as any).user?.id === opponentId);
+
+        // Emit to current user
+        client.emit('matchmaking_found', { roomId });
+        
+        // Emit to opponent
+        if (opponentSocket) {
+          opponentSocket.emit('matchmaking_found', { roomId });
+        }
+
+        console.log(`Match created: Room ${roomId} (${username} vs Opponent ${opponentId})`);
+      } else {
+        // Still searching - emit searching status
+        client.emit('matchmaking_searching', {
+          queuePosition: result.queuePosition,
+          estimatedWait: result.estimatedWait,
+        });
+
+        // Set interval to periodically update queue status (optional enhancement)
+        const updateInterval = setInterval(async () => {
+          // Check if user is still in queue
+          const stillInQueue = this.gameService.isInMatchmakingQueue(userId);
+          
+          if (!stillInQueue) {
+            clearInterval(updateInterval);
+            return;
+          }
+
+          // Try to match again
+          const queueInfo = this.gameService.getMatchmakingQueueInfo();
+          const playerInQueue = queueInfo.players.find(p => p.userId === userId);
+
+          if (playerInQueue) {
+            client.emit('matchmaking_searching', {
+              queuePosition: queueInfo.players.findIndex(p => p.userId === userId) + 1,
+              estimatedWait: Math.max(0, 60 - playerInQueue.waitTime),
+            });
+          }
+        }, 5000); // Update every 5 seconds
+
+        // Store interval ID to clean up later
+        (client as any).matchmakingUpdateInterval = updateInterval;
+      }
+
+      return 'Joined matchmaking';
+    } catch (error) {
+      this.handleError(client, error);
+      return 'Error joining matchmaking';
+    }
+  }
+
+  @SubscribeMessage('matchmaking_leave')
+  handleMatchmakingLeave(client: AuthenticatedSocket): string {
+    if (!client.user) {
+      client.emit('error', { code: 'UNAUTHORIZED', message: 'Not authenticated' });
+      return 'Unauthorized';
+    }
+
+    const userId = client.user.id;
+
+    try {
+      // Clear update interval if exists
+      const updateInterval = (client as any).matchmakingUpdateInterval;
+      if (updateInterval) {
+        clearInterval(updateInterval);
+        delete (client as any).matchmakingUpdateInterval;
+      }
+
+      // Leave matchmaking queue
+      const result = this.gameService.leaveMatchmaking(userId);
+
+      console.log(`User ${client.user.username} left matchmaking:`, result);
+
+      return result.message;
+    } catch (error) {
+      this.handleError(client, error);
+      return 'Error leaving matchmaking';
+    }
   }
 }

@@ -24,8 +24,26 @@ export interface Room {
   hostCountry: string;
 }
 
+interface MatchmakingPlayer {
+  userId: number;
+  username: string;
+  rating?: number;
+  joinedAt: Date;
+}
+
+interface MatchmakingPlayer {
+  userId: number;
+  username: string;
+  rating?: number;
+  joinedAt: Date;
+}
+
 @Injectable()
 export class GameService {
+  // Matchmaking queue (in-memory for MVP, can be moved to Redis later)
+  private matchmakingQueue: MatchmakingPlayer[] = [];
+  private matchmakingTimeouts = new Map<number, NodeJS.Timeout>();
+
   constructor(
     private prisma: PrismaService,
     @Inject(forwardRef(() => GameGateway)) private gameGateway: GameGateway,
@@ -179,11 +197,13 @@ export class GameService {
       hostUsername,
       hostRating: user?.rating ?? 1200,
       hostCountry: user?.country ?? 'KR',
+      guestId: undefined,
+      guestUsername: undefined,
       status: 'waiting',
       createdAt: new Date(),
       pgn: '',
-      whiteId: hostId,
-      blackId: undefined
+      whiteId: hostId, // Assign Host as White immediately
+      blackId: undefined,
     };
     this.rooms.set(roomId, room);
     this.activeRoomNames.add(finalRoomName.toLowerCase());
@@ -420,5 +440,198 @@ export class GameService {
     room.rematchExpiresAt = undefined;
 
     return room;
+  }
+
+  // ==================== Matchmaking System ====================
+
+  /**
+   * Join matchmaking queue
+   * @param userId User ID
+   * @param username Username
+   * @returns Queue position and estimated wait time
+   */
+  async joinMatchmaking(userId: number, username: string) {
+    // Check if user is already in queue
+    const existingIndex = this.matchmakingQueue.findIndex(p => p.userId === userId);
+    if (existingIndex !== -1) {
+      return {
+        queuePosition: existingIndex + 1,
+        estimatedWait: this.matchmakingQueue.length * 5, // Rough estimate: 5s per player
+      };
+    }
+
+    // Fetch user rating from database
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { rating: true },
+    });
+
+    // Add to queue
+    const player: MatchmakingPlayer = {
+      userId,
+      username,
+      rating: user?.rating || 1200, // Default rating if not found
+      joinedAt: new Date(),
+    };
+
+    this.matchmakingQueue.push(player);
+
+    console.log(`User ${username} (ID: ${userId}) joined matchmaking queue. Queue size: ${this.matchmakingQueue.length}`);
+
+    // Set timeout (60 seconds default, can be configured)
+    const timeout = setTimeout(() => {
+      this.handleMatchmakingTimeout(userId);
+    }, 60000); // 60 seconds
+
+    this.matchmakingTimeouts.set(userId, timeout);
+
+    // Try to find a match immediately
+    const match = this.tryToMatch(userId);
+
+    return {
+      queuePosition: this.matchmakingQueue.findIndex(p => p.userId === userId) + 1,
+      estimatedWait: this.matchmakingQueue.length * 5,
+      matched: match !== null,
+      matchData: match,
+    };
+  }
+
+  /**
+   * Leave matchmaking queue
+   * @param userId User ID
+   */
+  leaveMatchmaking(userId: number) {
+    const index = this.matchmakingQueue.findIndex(p => p.userId === userId);
+    
+    if (index === -1) {
+      return { success: false, message: 'Not in queue' };
+    }
+
+    // Remove from queue
+    this.matchmakingQueue.splice(index, 1);
+
+    // Clear timeout
+    const timeout = this.matchmakingTimeouts.get(userId);
+    if (timeout) {
+      clearTimeout(timeout);
+      this.matchmakingTimeouts.delete(userId);
+    }
+
+    console.log(`User ${userId} left matchmaking queue. Queue size: ${this.matchmakingQueue.length}`);
+
+    return { success: true, message: 'Left queue' };
+  }
+
+  /**
+   * Try to find a match for a user
+   * Uses simple ELO-based matchmaking with expanding search range
+   * @param userId User ID
+   * @returns Match data if found, null otherwise
+   */
+  private tryToMatch(userId: number): { roomId: string; opponentId: number } | null {
+    const playerIndex = this.matchmakingQueue.findIndex(p => p.userId === userId);
+    if (playerIndex === -1) return null;
+
+    const player = this.matchmakingQueue[playerIndex];
+    
+    // Search for opponent with similar rating
+    // Start with ±100 rating difference, expand over time
+    const waitTime = (Date.now() - player.joinedAt.getTime()) / 1000; // seconds
+    const ratingRange = 100 + (waitTime * 10); // Expand by 10 rating points per second
+
+    for (let i = 0; i < this.matchmakingQueue.length; i++) {
+      if (i === playerIndex) continue; // Skip self
+
+      const opponent = this.matchmakingQueue[i];
+      const ratingDiff = Math.abs((player.rating || 1200) - (opponent.rating || 1200));
+
+      if (ratingDiff <= ratingRange) {
+        // Match found! Create room
+        console.log(`Match found: ${player.username} (${player.rating}) vs ${opponent.username} (${opponent.rating})`);
+
+        // Remove both players from queue
+        this.matchmakingQueue.splice(Math.max(playerIndex, i), 1);
+        this.matchmakingQueue.splice(Math.min(playerIndex, i), 1);
+
+        // Clear timeouts
+        this.clearMatchmakingTimeout(player.userId);
+        this.clearMatchmakingTimeout(opponent.userId);
+
+        // Randomly assign colors
+        const [whitePlayer, blackPlayer] = Math.random() < 0.5 
+          ? [player, opponent] 
+          : [opponent, player];
+
+        // Create room automatically
+        const room = this.createRoom(whitePlayer.userId, whitePlayer.username, `${whitePlayer.username} vs ${blackPlayer.username}`);
+        
+        // Immediately assign both players
+        room.guestId = blackPlayer.userId;
+        room.guestUsername = blackPlayer.username;
+        room.blackId = blackPlayer.userId;
+        room.status = 'playing';
+        this.rooms.set(room.roomId, room);
+
+        return {
+          roomId: room.roomId,
+          opponentId: opponent.userId,
+        };
+      }
+    }
+
+    return null; // No match found
+  }
+
+  /**
+   * Handle matchmaking timeout
+   * @param userId User ID
+   */
+  private handleMatchmakingTimeout(userId: number) {
+    const index = this.matchmakingQueue.findIndex(p => p.userId === userId);
+    
+    if (index !== -1) {
+      const player = this.matchmakingQueue[index];
+      console.log(`Matchmaking timeout for user ${player.username} (ID: ${userId})`);
+      
+      // Remove from queue
+      this.matchmakingQueue.splice(index, 1);
+      this.matchmakingTimeouts.delete(userId);
+
+      // Gateway will emit timeout event
+    }
+  }
+
+  /**
+   * Clear matchmaking timeout
+   * @param userId User ID
+   */
+  private clearMatchmakingTimeout(userId: number) {
+    const timeout = this.matchmakingTimeouts.get(userId);
+    if (timeout) {
+      clearTimeout(timeout);
+      this.matchmakingTimeouts.delete(userId);
+    }
+  }
+
+  /**
+   * Get matchmaking queue info (for debugging/monitoring)
+   */
+  getMatchmakingQueueInfo() {
+    return {
+      queueSize: this.matchmakingQueue.length,
+      players: this.matchmakingQueue.map(p => ({
+        userId: p.userId,
+        username: p.username,
+        rating: p.rating,
+        waitTime: Math.floor((Date.now() - p.joinedAt.getTime()) / 1000),
+      })),
+    };
+  }
+
+  /**
+   * Check if user is in matchmaking queue
+   */
+  isInMatchmakingQueue(userId: number): boolean {
+    return this.matchmakingQueue.some(p => p.userId === userId);
   }
 }
