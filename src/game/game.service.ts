@@ -20,8 +20,8 @@ export interface Room {
   rematchRequestedBy?: number;
   rematchExpiresAt?: Date;
   cleanupTimer?: NodeJS.Timeout;
-  hostRating?: number;
-  hostCountry?: string;
+  hostRating: number;
+  hostCountry: string;
 }
 
 @Injectable()
@@ -254,11 +254,11 @@ export class GameService {
     }
 
     if (query?.ratingMin !== undefined) {
-      rooms = rooms.filter(room => (room.hostRating ?? 0) >= query.ratingMin!);
+      rooms = rooms.filter(room => room.hostRating >= query.ratingMin!);
     }
 
     if (query?.ratingMax !== undefined) {
-      rooms = rooms.filter(room => (room.hostRating ?? 0) <= query.ratingMax!);
+      rooms = rooms.filter(room => room.hostRating <= query.ratingMax!);
     }
 
     // 2. Sorting (Newest first)
