@@ -366,7 +366,15 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
   }
 
   notifyRoomCreated(room: any) {
-    this.server.emit('room_created', room);
+    const publicRoom = {
+      roomId: room.roomId,
+      roomName: room.roomName,
+      hostUsername: room.hostUsername,
+      hostRating: room.hostRating,
+      hostCountry: room.hostCountry,
+      createdAt: room.createdAt,
+    };
+    this.server.emit('room_created', publicRoom);
   }
 
   notifyRoomDeleted(roomId: string) {
