@@ -341,6 +341,95 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
     }
   }
 
+  @SubscribeMessage('resign_game')
+  async handleResign(client: AuthenticatedSocket, payload: { roomId: string }): Promise<string> {
+    if (!client.user) return 'Unauthorized';
+    const { roomId } = payload;
+    const room = this.gameService.getRoom(roomId);
+    if (!room) return 'Room not found';
+
+    // Determine opponent as winner
+    let result: string;
+    if (room.whiteId === client.user.id) {
+      result = '0-1'; // White resigned -> Black wins
+    } else if (room.blackId === client.user.id) {
+      result = '1-0'; // Black resigned -> White wins
+    } else {
+      return 'Not a player';
+    }
+
+    try {
+      await this.gameService.saveGameResult({
+        whiteId: room.whiteId,
+        blackId: room.blackId,
+        pgn: room.pgn,
+        result,
+      });
+
+      this.server.to(roomId).emit('game_ended', {
+        result,
+        saved: true,
+        reason: 'resignation' 
+      });
+
+      room.status = 'finished';
+      room.finishedAt = new Date();
+      this.gameService.scheduleRoomCleanup(roomId, 180);
+
+      return 'Resigned';
+    } catch (error) {
+       console.error(error);
+       return 'Error resigning';
+    }
+  }
+
+  @SubscribeMessage('offer_draw')
+  handleOfferDraw(client: AuthenticatedSocket, payload: { roomId: string }): string {
+    if (!client.user) return 'Unauthorized';
+    // Forward to opponent
+    client.to(payload.roomId).emit('draw_offered', { offeredBy: client.user.id });
+    return 'Draw offered';
+  }
+
+  @SubscribeMessage('accept_draw')
+  async handleAcceptDraw(client: AuthenticatedSocket, payload: { roomId: string }): Promise<string> {
+    if (!client.user) return 'Unauthorized';
+    const { roomId } = payload;
+    const room = this.gameService.getRoom(roomId);
+    if (!room) return 'Room not found';
+
+    try {
+      const result = '1/2-1/2';
+      await this.gameService.saveGameResult({
+        whiteId: room.whiteId,
+        blackId: room.blackId,
+        pgn: room.pgn,
+        result,
+      });
+
+      this.server.to(roomId).emit('game_ended', {
+        result,
+        saved: true,
+        reason: 'draw_agreement'
+      });
+
+      room.status = 'finished';
+      room.finishedAt = new Date();
+      this.gameService.scheduleRoomCleanup(roomId, 180);
+      
+      return 'Draw accepted';
+    } catch (e) {
+      return 'Error processing draw';
+    }
+  }
+
+  @SubscribeMessage('decline_draw')
+  handleDeclineDraw(client: AuthenticatedSocket, payload: { roomId: string }): string {
+    if (!client.user) return 'Unauthorized';
+    client.to(payload.roomId).emit('draw_declined', { declinedBy: client.user.id });
+    return 'Draw declined';
+  }
+
   private handleError(client: Socket, error: any) {
     if (error instanceof GameException) {
       client.emit('error', { code: error.code, message: error.message });
