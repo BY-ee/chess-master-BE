@@ -35,7 +35,7 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
     @Inject(forwardRef(() => GameService)) private readonly gameService: GameService,
     private readonly jwtService: JwtService,
   ) {}
-
+  
   afterInit(server: Server) {
     console.log('Game Gateway Initialized');
   }
@@ -295,7 +295,7 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
       room.finishedAt = new Date();
       
       // Schedule auto-deletion after 3 minutes (180s)
-      this.gameService.scheduleRoomCleanup(payload.roomId, 180);
+      this.gameService.scheduleRoomCleanup(payload.roomId);
 
       return 'Game saved and ended';
     } catch (error) {
@@ -404,7 +404,7 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
 
       room.status = 'finished';
       room.finishedAt = new Date();
-      this.gameService.scheduleRoomCleanup(roomId, 180);
+      this.gameService.scheduleRoomCleanup(roomId);
 
       return 'Resigned';
     } catch (error) {
@@ -446,7 +446,7 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
 
       room.status = 'finished';
       room.finishedAt = new Date();
-      this.gameService.scheduleRoomCleanup(roomId, 180);
+      this.gameService.scheduleRoomCleanup(roomId);
       
       return 'Draw accepted';
     } catch (e) {

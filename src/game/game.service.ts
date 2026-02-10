@@ -34,6 +34,16 @@ interface MatchmakingPlayer {
 
 @Injectable()
 export class GameService {
+  // Constants
+  private readonly DEFAULT_RATING = 1200;
+  private readonly ROOM_CLEANUP_TIMEOUT = 180; // 3 minutes
+  private readonly WAITING_ROOM_CLEANUP_TIMEOUT = 600; // 10 minutes
+  private readonly REMATCH_EXPIRATION_MS = 60000; // 1 minute
+  private readonly MATCHMAKING_TIMEOUT_MS = 60000; // 1 minute
+  private readonly MATCHMAKING_INITIAL_RANGE = 100;
+  private readonly MATCHMAKING_RANGE_EXPANSION_RATE = 10;
+  private readonly MATCHMAKING_ESTIMATED_WAIT_FACTOR = 5;
+
   // Matchmaking queue (in-memory for MVP, can be moved to Redis later)
   private matchmakingQueue: MatchmakingPlayer[] = [];
   private matchmakingTimeouts = new Map<number, NodeJS.Timeout>();
@@ -215,7 +225,7 @@ export class GameService {
     }
   }
 
-  scheduleRoomCleanup(roomId: string, seconds: number = 180) {
+  scheduleRoomCleanup(roomId: string, seconds: number = this.ROOM_CLEANUP_TIMEOUT) {
     this.clearCleanupTimer(roomId);
     
     const room = this.rooms.get(roomId);
@@ -252,7 +262,7 @@ export class GameService {
       roomName: finalRoomName,
       hostId,
       hostUsername,
-      hostRating: user?.rating ?? 1200,
+      hostRating: user?.rating ?? this.DEFAULT_RATING,
       hostCountry: user?.country ?? 'KR',
       guestId: undefined,
       guestUsername: undefined,
@@ -266,7 +276,7 @@ export class GameService {
     this.activeRoomNames.add(finalRoomName.toLowerCase());
     
     // Auto-cleanup waiting room after 10 minutes (600 seconds) if no one joins
-    this.scheduleRoomCleanup(roomId, 600);
+    this.scheduleRoomCleanup(roomId, this.WAITING_ROOM_CLEANUP_TIMEOUT);
     
     // Return room data without the timeout object to avoid circular reference in JSON
     const { cleanupTimer, ...roomData } = room;
@@ -303,7 +313,7 @@ export class GameService {
       });
 
       room.guestUsername = guestUsername;
-      room.guestRating = guestUser?.rating ?? 1200;
+      room.guestRating = guestUser?.rating ?? this.DEFAULT_RATING;
       room.status = 'playing';
       
       // Clear the waiting cleanup timer as the game is starting
@@ -475,13 +485,13 @@ export class GameService {
 
     // Check if room is within 3-minute hard TTL
     const now = new Date();
-    if (room.finishedAt && (now.getTime() - room.finishedAt.getTime() > 180000)) {
+    if (room.finishedAt && (now.getTime() - room.finishedAt.getTime() > (this.ROOM_CLEANUP_TIMEOUT * 1000))) {
        throw new GameException(GameErrorCode.ROOM_EXPIRED, 'Room expired');
     }
 
     room.rematchRequestedBy = userId;
     // Set 60-second acceptance window
-    room.rematchExpiresAt = new Date(Date.now() + 60000); 
+    room.rematchExpiresAt = new Date(Date.now() + this.REMATCH_EXPIRATION_MS); 
     
     return {
       rematchExpiresAt: room.rematchExpiresAt
@@ -554,7 +564,7 @@ export class GameService {
     if (existingIndex !== -1) {
       return {
         queuePosition: existingIndex + 1,
-        estimatedWait: this.matchmakingQueue.length * 5, // Rough estimate: 5s per player
+        estimatedWait: this.matchmakingQueue.length * this.MATCHMAKING_ESTIMATED_WAIT_FACTOR,
       };
     }
 
@@ -568,7 +578,7 @@ export class GameService {
     const player: MatchmakingPlayer = {
       userId,
       username,
-      rating: user?.rating || 1200, // Default rating if not found
+      rating: user?.rating || this.DEFAULT_RATING,
       joinedAt: new Date(),
     };
 
@@ -579,7 +589,7 @@ export class GameService {
     // Set timeout (60 seconds default, can be configured)
     const timeout = setTimeout(() => {
       this.handleMatchmakingTimeout(userId);
-    }, 60000); // 60 seconds
+    }, this.MATCHMAKING_TIMEOUT_MS);
 
     this.matchmakingTimeouts.set(userId, timeout);
 
@@ -588,7 +598,7 @@ export class GameService {
 
     return {
       queuePosition: this.matchmakingQueue.findIndex(p => p.userId === userId) + 1,
-      estimatedWait: this.matchmakingQueue.length * 5,
+      estimatedWait: this.matchmakingQueue.length * this.MATCHMAKING_ESTIMATED_WAIT_FACTOR,
       matched: match !== null,
       matchData: match,
     };
@@ -635,13 +645,13 @@ export class GameService {
     // Search for opponent with similar rating
     // Start with ±100 rating difference, expand over time
     const waitTime = (Date.now() - player.joinedAt.getTime()) / 1000; // seconds
-    const ratingRange = 100 + (waitTime * 10); // Expand by 10 rating points per second
+    const ratingRange = this.MATCHMAKING_INITIAL_RANGE + (waitTime * this.MATCHMAKING_RANGE_EXPANSION_RATE);
 
     for (let i = 0; i < this.matchmakingQueue.length; i++) {
       if (i === playerIndex) continue; // Skip self
 
       const opponent = this.matchmakingQueue[i];
-      const ratingDiff = Math.abs((player.rating || 1200) - (opponent.rating || 1200));
+      const ratingDiff = Math.abs((player.rating || this.DEFAULT_RATING) - (opponent.rating || this.DEFAULT_RATING));
 
       if (ratingDiff <= ratingRange) {
         // Match found! Create room
@@ -668,7 +678,7 @@ export class GameService {
         // Immediately assign both players
         room.guestId = blackPlayer.userId;
         room.guestUsername = blackPlayer.username;
-        room.guestRating = blackPlayer.rating ?? 1200;
+        room.guestRating = blackPlayer.rating ?? this.DEFAULT_RATING;
         room.blackId = blackPlayer.userId;
         room.status = 'playing';
         this.rooms.set(room.roomId, room);
