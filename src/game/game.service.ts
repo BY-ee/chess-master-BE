@@ -90,79 +90,95 @@ export class GameService {
     pgn: string;
     result: string;
   }) {
-    // 1. Save the game record
-    const game = await this.prisma.game.create({
-      data: {
-        white: data.whiteId ? { connect: { id: data.whiteId } } : undefined,
-        black: data.blackId ? { connect: { id: data.blackId } } : undefined,
-        whiteAi: data.whiteAiId ? { connect: { id: data.whiteAiId } } : undefined,
-        blackAi: data.blackAiId ? { connect: { id: data.blackAiId } } : undefined,
-        pgn: data.pgn,
-        result: data.result,
-      },
-    });
+    // Wrap everything in a transaction to ensure data integrity
+    return this.prisma.$transaction(async (tx) => {
+      // 1. Save the game record
+      const game = await tx.game.create({
+        data: {
+          white: data.whiteId ? { connect: { id: data.whiteId } } : undefined,
+          black: data.blackId ? { connect: { id: data.blackId } } : undefined,
+          whiteAi: data.whiteAiId ? { connect: { id: data.whiteAiId } } : undefined,
+          blackAi: data.blackAiId ? { connect: { id: data.blackAiId } } : undefined,
+          pgn: data.pgn,
+          result: data.result,
+        },
+      });
 
-    let ratingChanges: { white?: { old: number, new: number }, black?: { old: number, new: number } } | undefined;
+      let ratingChanges: { white?: { old: number, new: number }, black?: { old: number, new: number } } | undefined;
 
-    // 2. Update Stats
-    
-    // Case A: User vs User (PvP) - Update ELO Ratings
-    if (data.whiteId && data.blackId) {
-      const whiteUser = await this.prisma.user.findUnique({ where: { id: data.whiteId } });
-      const blackUser = await this.prisma.user.findUnique({ where: { id: data.blackId } });
-
-      if (whiteUser && blackUser) {
-        let whiteScore = 0.5;
-        let blackScore = 0.5;
-
-        if (data.result === '1-0') {
-          whiteScore = 1;
-          blackScore = 0;
-        } else if (data.result === '0-1') {
-          whiteScore = 0;
-          blackScore = 1;
-        }
-
-        const newWhiteRating = this.calculateNewRating(whiteUser.rating, blackUser.rating, whiteScore);
-        const newBlackRating = this.calculateNewRating(blackUser.rating, whiteUser.rating, blackScore);
-
-        // Update Users
-        await this.prisma.user.update({
-          where: { id: data.whiteId },
-          data: { rating: newWhiteRating },
-        });
-
-        await this.prisma.user.update({
-          where: { id: data.blackId },
-          data: { rating: newBlackRating },
-        });
-
-        ratingChanges = {
-          white: { old: whiteUser.rating, new: newWhiteRating },
-          black: { old: blackUser.rating, new: newBlackRating },
-        };
-      }
-    }
-    
-    // Case B: User vs AI
-    else if (data.whiteId && data.blackAiId) {
-      // User is White
-      let outcome: 'win' | 'loss' | 'draw' = 'draw';
-      if (data.result === '1-0') outcome = 'win';
-      else if (data.result === '0-1') outcome = 'loss';
+      // 2. Update Stats
       
-      await this.updateUserAiStats(data.whiteId, data.blackAiId, outcome);
-    }
-    else if (data.blackId && data.whiteAiId) {
-       // User is Black
-       let outcome: 'win' | 'loss' | 'draw' = 'draw';
-       if (data.result === '0-1') outcome = 'win';
-       else if (data.result === '1-0') outcome = 'loss';
+      // Case A: User vs User (PvP) - Update ELO Ratings
+      if (data.whiteId && data.blackId) {
+        // Fetch users inside transaction to get latest ratings
+        const whiteUser = await tx.user.findUnique({ where: { id: data.whiteId } });
+        const blackUser = await tx.user.findUnique({ where: { id: data.blackId } });
 
-       await this.updateUserAiStats(data.blackId, data.whiteAiId, outcome);
-    }
+        if (whiteUser && blackUser) {
+          let whiteScore = 0.5;
+          let blackScore = 0.5;
 
-    return { game, ratingChanges };
+          if (data.result === '1-0') {
+            whiteScore = 1;
+            blackScore = 0;
+          } else if (data.result === '0-1') {
+            whiteScore = 0;
+            blackScore = 1;
+          }
+
+          const newWhiteRating = this.calculateNewRating(whiteUser.rating, blackUser.rating, whiteScore);
+          const newBlackRating = this.calculateNewRating(blackUser.rating, whiteUser.rating, blackScore);
+
+          // Update Users
+          await tx.user.update({
+            where: { id: data.whiteId },
+            data: { rating: newWhiteRating },
+          });
+
+          await tx.user.update({
+            where: { id: data.blackId },
+            data: { rating: newBlackRating },
+          });
+
+          ratingChanges = {
+            white: { old: whiteUser.rating, new: newWhiteRating },
+            black: { old: blackUser.rating, new: newBlackRating },
+          };
+        }
+      }
+      
+      // Case B: User vs AI
+      else if (data.whiteId && data.blackAiId) {
+        // User is White
+        let outcome: 'win' | 'loss' | 'draw' = 'draw';
+        if (data.result === '1-0') outcome = 'win';
+        else if (data.result === '0-1') outcome = 'loss';
+        
+        // Use local helper but adapted for transaction?
+        // The helper `updateUserAiStats` uses `this.prisma` directly which is outside transaction.
+        // We should inline the logic or pass `tx` to helper. 
+        // For simplicity contributing to file size, I'll inline the simple upsert here using `tx`.
+        await tx.userAiStats.upsert({
+            where: { userId_aiModelId: { userId: data.whiteId, aiModelId: data.blackAiId } },
+            create: { userId: data.whiteId, aiModelId: data.blackAiId, wins: outcome === 'win' ? 1 : 0, losses: outcome === 'loss' ? 1 : 0, draws: outcome === 'draw' ? 1 : 0 },
+            update: { wins: outcome === 'win' ? { increment: 1 } : undefined, losses: outcome === 'loss' ? { increment: 1 } : undefined, draws: outcome === 'draw' ? { increment: 1 } : undefined },
+        });
+      }
+      else if (data.blackId && data.whiteAiId) {
+         // User is Black
+         let outcome: 'win' | 'loss' | 'draw' = 'draw';
+         if (data.result === '0-1') outcome = 'win';
+         else if (data.result === '1-0') outcome = 'loss';
+
+         await tx.userAiStats.upsert({
+            where: { userId_aiModelId: { userId: data.blackId, aiModelId: data.whiteAiId } },
+            create: { userId: data.blackId, aiModelId: data.whiteAiId, wins: outcome === 'win' ? 1 : 0, losses: outcome === 'loss' ? 1 : 0, draws: outcome === 'draw' ? 1 : 0 },
+            update: { wins: outcome === 'win' ? { increment: 1 } : undefined, losses: outcome === 'loss' ? { increment: 1 } : undefined, draws: outcome === 'draw' ? { increment: 1 } : undefined },
+        });
+      }
+
+      return { game, ratingChanges };
+    });
   }
 
   async getGamesByUserId(userId: number) {
@@ -276,25 +292,33 @@ export class GameService {
       throw new GameException(GameErrorCode.ROOM_FULL, 'Room is full');
     }
 
-    // Fetch guest rating from database
-    const guestUser = await this.prisma.user.findUnique({
-      where: { id: guestId },
-      select: { rating: true },
-    });
-
+    // Optimistic locking: Reserve the spot synchronously
     room.guestId = guestId;
-    room.guestUsername = guestUsername;
-    room.guestRating = guestUser?.rating ?? 1200;
-    room.status = 'playing';
-    
-    // Clear the waiting cleanup timer as the game is starting
-    this.clearCleanupTimer(roomId);
-    
-    // Assign colors (Host is already White)
-    room.blackId = guestId;
-    
-    this.rooms.set(roomId, room);
-    return room;
+
+    try {
+      // Fetch guest rating from database
+      const guestUser = await this.prisma.user.findUnique({
+        where: { id: guestId },
+        select: { rating: true },
+      });
+
+      room.guestUsername = guestUsername;
+      room.guestRating = guestUser?.rating ?? 1200;
+      room.status = 'playing';
+      
+      // Clear the waiting cleanup timer as the game is starting
+      this.clearCleanupTimer(roomId);
+      
+      // Assign colors (Host is already White)
+      room.blackId = guestId;
+      
+      this.rooms.set(roomId, room);
+      return room;
+    } catch (error) {
+      // Revert reservation on error
+      room.guestId = undefined;
+      throw error;
+    }
   }
 
   getAvailableRooms(query?: { 
