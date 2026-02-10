@@ -170,24 +170,42 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
         else if (room.blackId === userId) color = 'b';
       }
 
-      // 3. Send Game Start/Restore Event (Initial State)
+      // 3. Build player info using service helper
+      const players = this.gameService.getPlayersInfo(room);
+
+      // Determine opponent info for the joining player
+      let opponent: { username: string; rating?: number } | undefined;
+      if (color === 'w' && players.black) {
+        opponent = players.black;
+      } else if (color === 'b' && players.white) {
+        opponent = players.white;
+      }
+
+      // Send Game Start/Restore Event (Initial State) with opponent info
       client.emit('game_start', { 
         color: color === 'spectator' ? 'w' : color, 
         role: color, 
         pgn: room.pgn || '', 
-        fen: '' 
+        fen: '',
+        opponent,
+        players,
       });
 
       // 4. Calculate Connected Players & Emit 'player_joined'
-      // 4. Calculate Connected Players & Emit 'player_joined'
       const { count: playerCount, connectedIds: connectedUserIds } = await this.calculateConnectedPlayers(roomId, room, userId);
+
+      // Determine rating for the joining player
+      let rating: number | undefined;
+      if (color === 'w') rating = players.white?.rating;
+      else if (color === 'b') rating = players.black?.rating;
 
       // Broadcast player_joined to everyone in the room
       this.server.to(roomId).emit('player_joined', {
         userId: userId,
         username: client.user?.username,
         role: color,
-        currentPlayers: playerCount // Updated count
+        rating,
+        currentPlayers: playerCount,
       });
 
       // 5. Check Game Ready Condition
@@ -200,7 +218,8 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
         this.server.to(roomId).emit('game_ready', {
           roomId,
           whiteId: room.whiteId,
-          blackId: room.blackId
+          blackId: room.blackId,
+          players,
         });
       }
       
@@ -307,9 +326,12 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
       
       // Notify all players that game restarted
       // Since colors are swapped in service, we need to broadcast new state
+      const players = this.gameService.getPlayersInfo(room);
+
       this.server.to(payload.roomId).emit('game_restarted', {
         whiteId: room.whiteId,
-        blackId: room.blackId
+        blackId: room.blackId,
+        players,
       });
       
       // Re-emit game_start to update clients individually with their new colors

@@ -22,13 +22,7 @@ export interface Room {
   cleanupTimer?: NodeJS.Timeout;
   hostRating: number;
   hostCountry: string;
-}
-
-interface MatchmakingPlayer {
-  userId: number;
-  username: string;
-  rating?: number;
-  joinedAt: Date;
+  guestRating?: number;
 }
 
 interface MatchmakingPlayer {
@@ -220,7 +214,7 @@ export class GameService {
     return roomData;
   }
 
-  joinRoom(roomId: string, guestId: number, guestUsername: string) {
+  async joinRoom(roomId: string, guestId: number, guestUsername: string) {
     const room = this.rooms.get(roomId);
     if (!room) {
       throw new GameException(GameErrorCode.ROOM_NOT_FOUND, 'Room not found');
@@ -235,8 +229,15 @@ export class GameService {
       throw new GameException(GameErrorCode.ROOM_FULL, 'Room is full');
     }
 
+    // Fetch guest rating from database
+    const guestUser = await this.prisma.user.findUnique({
+      where: { id: guestId },
+      select: { rating: true },
+    });
+
     room.guestId = guestId;
     room.guestUsername = guestUsername;
+    room.guestRating = guestUser?.rating ?? 1200;
     room.status = 'playing';
     
     // Clear the waiting cleanup timer as the game is starting
@@ -359,6 +360,24 @@ export class GameService {
     }
     
     return latestActiveRoom || latestFinishedRoom;
+  }
+
+  /**
+   * Build players info object from a Room for event payloads
+   */
+  getPlayersInfo(room: Room) {
+    const resolvePlayer = (playerId?: number) => {
+      if (!playerId) return undefined;
+      if (playerId === room.hostId) {
+        return { username: room.hostUsername, rating: room.hostRating };
+      }
+      return { username: room.guestUsername || 'Unknown', rating: room.guestRating };
+    };
+
+    return {
+      white: resolvePlayer(room.whiteId),
+      black: resolvePlayer(room.blackId),
+    };
   }
 
   getRoom(roomId: string) {
@@ -578,6 +597,7 @@ export class GameService {
         // Immediately assign both players
         room.guestId = blackPlayer.userId;
         room.guestUsername = blackPlayer.username;
+        room.guestRating = blackPlayer.rating ?? 1200;
         room.blackId = blackPlayer.userId;
         room.status = 'playing';
         this.rooms.set(room.roomId, room);
