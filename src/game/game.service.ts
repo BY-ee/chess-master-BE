@@ -74,6 +74,14 @@ export class GameService {
     return stats;
   }
 
+  /**
+   * Calculate new rating using ELO system
+   */
+  private calculateNewRating(currentRating: number, opponentRating: number, actualScore: number, kFactor: number = 32): number {
+    const expectedScore = 1 / (1 + Math.pow(10, (opponentRating - currentRating) / 400));
+    return Math.round(currentRating + kFactor * (actualScore - expectedScore));
+  }
+
   async saveGameResult(data: {
     whiteId?: number;
     blackId?: number;
@@ -94,20 +102,59 @@ export class GameService {
       },
     });
 
-    // 2. Update Stats if it's a User vs AI game
-    // Case A: User is White, AI is Black
-    if (data.whiteId && data.blackAiId) {
-      // 1-0 = Win, 0-1 = Loss, 1/2-1/2 = Draw
+    let ratingChanges: { white?: { old: number, new: number }, black?: { old: number, new: number } } | undefined;
+
+    // 2. Update Stats
+    
+    // Case A: User vs User (PvP) - Update ELO Ratings
+    if (data.whiteId && data.blackId) {
+      const whiteUser = await this.prisma.user.findUnique({ where: { id: data.whiteId } });
+      const blackUser = await this.prisma.user.findUnique({ where: { id: data.blackId } });
+
+      if (whiteUser && blackUser) {
+        let whiteScore = 0.5;
+        let blackScore = 0.5;
+
+        if (data.result === '1-0') {
+          whiteScore = 1;
+          blackScore = 0;
+        } else if (data.result === '0-1') {
+          whiteScore = 0;
+          blackScore = 1;
+        }
+
+        const newWhiteRating = this.calculateNewRating(whiteUser.rating, blackUser.rating, whiteScore);
+        const newBlackRating = this.calculateNewRating(blackUser.rating, whiteUser.rating, blackScore);
+
+        // Update Users
+        await this.prisma.user.update({
+          where: { id: data.whiteId },
+          data: { rating: newWhiteRating },
+        });
+
+        await this.prisma.user.update({
+          where: { id: data.blackId },
+          data: { rating: newBlackRating },
+        });
+
+        ratingChanges = {
+          white: { old: whiteUser.rating, new: newWhiteRating },
+          black: { old: blackUser.rating, new: newBlackRating },
+        };
+      }
+    }
+    
+    // Case B: User vs AI
+    else if (data.whiteId && data.blackAiId) {
+      // User is White
       let outcome: 'win' | 'loss' | 'draw' = 'draw';
       if (data.result === '1-0') outcome = 'win';
       else if (data.result === '0-1') outcome = 'loss';
       
       await this.updateUserAiStats(data.whiteId, data.blackAiId, outcome);
     }
-    
-    // Case B: User is Black, AI is White
     else if (data.blackId && data.whiteAiId) {
-       // 0-1 = Win (for Black), 1-0 = Loss
+       // User is Black
        let outcome: 'win' | 'loss' | 'draw' = 'draw';
        if (data.result === '0-1') outcome = 'win';
        else if (data.result === '1-0') outcome = 'loss';
@@ -115,7 +162,7 @@ export class GameService {
        await this.updateUserAiStats(data.blackId, data.whiteAiId, outcome);
     }
 
-    return game;
+    return { game, ratingChanges };
   }
 
   async getGamesByUserId(userId: number) {

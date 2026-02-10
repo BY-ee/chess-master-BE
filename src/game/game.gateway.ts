@@ -13,11 +13,17 @@ interface GameState {
   pgn: string;
 }
 
-interface AuthenticatedSocket extends Socket {
+interface GameSocketData {
   user?: {
     id: number;
     username: string;
   };
+  matchmakingUpdateInterval?: NodeJS.Timeout;
+}
+
+interface AuthenticatedSocket extends Socket {
+  user?: GameSocketData['user'];
+  data: GameSocketData;
 }
 
 @WebSocketGateway({ cors: true })
@@ -80,7 +86,7 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
       this.gameService.leaveMatchmaking(userId);
 
       // Clear matchmaking update interval if exists
-      const updateInterval = (client as any).matchmakingUpdateInterval;
+      const updateInterval = client.data.matchmakingUpdateInterval;
       if (updateInterval) {
         clearInterval(updateInterval);
       }
@@ -269,7 +275,7 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
       const finalPgn = payload.pgn || room.pgn;
 
       // Save to database
-      await this.gameService.saveGameResult({
+      const { ratingChanges } = await this.gameService.saveGameResult({
         whiteId: room.whiteId,
         blackId: room.blackId,
         // AI IDs not currently tracked in room for Multiplayer, assuming user vs user for now
@@ -281,6 +287,7 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
       this.server.to(payload.roomId).emit('game_ended', {
         result,
         saved: true,
+        ratingChanges,
       });
 
       // Update room status to finished instead of deleting
@@ -381,7 +388,7 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
     }
 
     try {
-      await this.gameService.saveGameResult({
+      const { ratingChanges } = await this.gameService.saveGameResult({
         whiteId: room.whiteId,
         blackId: room.blackId,
         pgn: room.pgn,
@@ -391,7 +398,8 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
       this.server.to(roomId).emit('game_ended', {
         result,
         saved: true,
-        reason: 'resignation' 
+        reason: 'resignation',
+        ratingChanges,
       });
 
       room.status = 'finished';
@@ -422,7 +430,7 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
 
     try {
       const result = '1/2-1/2';
-      await this.gameService.saveGameResult({
+      const { ratingChanges } = await this.gameService.saveGameResult({
         whiteId: room.whiteId,
         blackId: room.blackId,
         pgn: room.pgn,
@@ -432,7 +440,8 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
       this.server.to(roomId).emit('game_ended', {
         result,
         saved: true,
-        reason: 'draw_agreement'
+        reason: 'draw_agreement',
+        ratingChanges,
       });
 
       room.status = 'finished';
@@ -513,7 +522,7 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
     const connectedIds = new Set<number>();
     
     for (const socket of sockets) {
-      const socketUserId = (socket.data as any).user?.id;
+      const socketUserId = (socket.data as GameSocketData).user?.id;
       if (socketUserId) connectedIds.add(socketUserId);
     }
     
@@ -553,7 +562,7 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
         // Emit match found to BOTH players
         // Find opponent's socket
         const allSockets = await this.server.fetchSockets();
-        const opponentSocket = allSockets.find(s => (s.data as any).user?.id === opponentId);
+        const opponentSocket = allSockets.find(s => (s.data as GameSocketData).user?.id === opponentId);
 
         // Emit to current user
         client.emit('matchmaking_found', { roomId });
@@ -594,7 +603,7 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
         }, 5000); // Update every 5 seconds
 
         // Store interval ID to clean up later
-        (client as any).matchmakingUpdateInterval = updateInterval;
+        client.data.matchmakingUpdateInterval = updateInterval;
       }
 
       return 'Joined matchmaking';
@@ -615,10 +624,10 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
 
     try {
       // Clear update interval if exists
-      const updateInterval = (client as any).matchmakingUpdateInterval;
+      const updateInterval = client.data.matchmakingUpdateInterval;
       if (updateInterval) {
         clearInterval(updateInterval);
-        delete (client as any).matchmakingUpdateInterval;
+        delete client.data.matchmakingUpdateInterval;
       }
 
       // Leave matchmaking queue
