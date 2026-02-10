@@ -13,11 +13,17 @@ interface GameState {
   pgn: string;
 }
 
-interface AuthenticatedSocket extends Socket {
+interface GameSocketData {
   user?: {
     id: number;
     username: string;
   };
+  matchmakingUpdateInterval?: NodeJS.Timeout;
+}
+
+interface AuthenticatedSocket extends Socket {
+  user?: GameSocketData['user'];
+  data: GameSocketData;
 }
 
 @WebSocketGateway({ cors: true })
@@ -29,7 +35,7 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
     @Inject(forwardRef(() => GameService)) private readonly gameService: GameService,
     private readonly jwtService: JwtService,
   ) {}
-
+  
   afterInit(server: Server) {
     console.log('Game Gateway Initialized');
   }
@@ -75,6 +81,15 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
     // Remove user from online set
     if (userId) {
       this.onlineUsers.delete(userId);
+
+      // Remove from matchmaking queue if present
+      this.gameService.leaveMatchmaking(userId);
+
+      // Clear matchmaking update interval if exists
+      const updateInterval = client.data.matchmakingUpdateInterval;
+      if (updateInterval) {
+        clearInterval(updateInterval);
+      }
     }
     
     console.log(`Client disconnected: ${client.id} (User: ${username})`);
@@ -161,24 +176,42 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
         else if (room.blackId === userId) color = 'b';
       }
 
-      // 3. Send Game Start/Restore Event (Initial State)
+      // 3. Build player info using service helper
+      const players = this.gameService.getPlayersInfo(room);
+
+      // Determine opponent info for the joining player
+      let opponent: { username: string; rating?: number } | undefined;
+      if (color === 'w' && players.black) {
+        opponent = players.black;
+      } else if (color === 'b' && players.white) {
+        opponent = players.white;
+      }
+
+      // Send Game Start/Restore Event (Initial State) with opponent info
       client.emit('game_start', { 
         color: color === 'spectator' ? 'w' : color, 
         role: color, 
         pgn: room.pgn || '', 
-        fen: '' 
+        fen: '',
+        opponent,
+        players,
       });
 
       // 4. Calculate Connected Players & Emit 'player_joined'
-      // 4. Calculate Connected Players & Emit 'player_joined'
       const { count: playerCount, connectedIds: connectedUserIds } = await this.calculateConnectedPlayers(roomId, room, userId);
+
+      // Determine rating for the joining player
+      let rating: number | undefined;
+      if (color === 'w') rating = players.white?.rating;
+      else if (color === 'b') rating = players.black?.rating;
 
       // Broadcast player_joined to everyone in the room
       this.server.to(roomId).emit('player_joined', {
         userId: userId,
         username: client.user?.username,
         role: color,
-        currentPlayers: playerCount // Updated count
+        rating,
+        currentPlayers: playerCount,
       });
 
       // 5. Check Game Ready Condition
@@ -191,7 +224,8 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
         this.server.to(roomId).emit('game_ready', {
           roomId,
           whiteId: room.whiteId,
-          blackId: room.blackId
+          blackId: room.blackId,
+          players,
         });
       }
       
@@ -241,7 +275,7 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
       const finalPgn = payload.pgn || room.pgn;
 
       // Save to database
-      await this.gameService.saveGameResult({
+      const { ratingChanges } = await this.gameService.saveGameResult({
         whiteId: room.whiteId,
         blackId: room.blackId,
         // AI IDs not currently tracked in room for Multiplayer, assuming user vs user for now
@@ -253,6 +287,7 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
       this.server.to(payload.roomId).emit('game_ended', {
         result,
         saved: true,
+        ratingChanges,
       });
 
       // Update room status to finished instead of deleting
@@ -260,7 +295,7 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
       room.finishedAt = new Date();
       
       // Schedule auto-deletion after 3 minutes (180s)
-      this.gameService.scheduleRoomCleanup(payload.roomId, 180);
+      this.gameService.scheduleRoomCleanup(payload.roomId);
 
       return 'Game saved and ended';
     } catch (error) {
@@ -298,9 +333,12 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
       
       // Notify all players that game restarted
       // Since colors are swapped in service, we need to broadcast new state
+      const players = this.gameService.getPlayersInfo(room);
+
       this.server.to(payload.roomId).emit('game_restarted', {
         whiteId: room.whiteId,
-        blackId: room.blackId
+        blackId: room.blackId,
+        players,
       });
       
       // Re-emit game_start to update clients individually with their new colors
@@ -330,6 +368,97 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
       this.handleError(client, error);
       return 'Error declining rematch';
     }
+  }
+
+  @SubscribeMessage('resign_game')
+  async handleResign(client: AuthenticatedSocket, payload: { roomId: string }): Promise<string> {
+    if (!client.user) return 'Unauthorized';
+    const { roomId } = payload;
+    const room = this.gameService.getRoom(roomId);
+    if (!room) return 'Room not found';
+
+    // Determine opponent as winner
+    let result: string;
+    if (room.whiteId === client.user.id) {
+      result = '0-1'; // White resigned -> Black wins
+    } else if (room.blackId === client.user.id) {
+      result = '1-0'; // Black resigned -> White wins
+    } else {
+      return 'Not a player';
+    }
+
+    try {
+      const { ratingChanges } = await this.gameService.saveGameResult({
+        whiteId: room.whiteId,
+        blackId: room.blackId,
+        pgn: room.pgn,
+        result,
+      });
+
+      this.server.to(roomId).emit('game_ended', {
+        result,
+        saved: true,
+        reason: 'resignation',
+        ratingChanges,
+      });
+
+      room.status = 'finished';
+      room.finishedAt = new Date();
+      this.gameService.scheduleRoomCleanup(roomId);
+
+      return 'Resigned';
+    } catch (error) {
+       console.error(error);
+       return 'Error resigning';
+    }
+  }
+
+  @SubscribeMessage('offer_draw')
+  handleOfferDraw(client: AuthenticatedSocket, payload: { roomId: string }): string {
+    if (!client.user) return 'Unauthorized';
+    // Forward to opponent
+    client.to(payload.roomId).emit('draw_offered', { offeredBy: client.user.id });
+    return 'Draw offered';
+  }
+
+  @SubscribeMessage('accept_draw')
+  async handleAcceptDraw(client: AuthenticatedSocket, payload: { roomId: string }): Promise<string> {
+    if (!client.user) return 'Unauthorized';
+    const { roomId } = payload;
+    const room = this.gameService.getRoom(roomId);
+    if (!room) return 'Room not found';
+
+    try {
+      const result = '1/2-1/2';
+      const { ratingChanges } = await this.gameService.saveGameResult({
+        whiteId: room.whiteId,
+        blackId: room.blackId,
+        pgn: room.pgn,
+        result,
+      });
+
+      this.server.to(roomId).emit('game_ended', {
+        result,
+        saved: true,
+        reason: 'draw_agreement',
+        ratingChanges,
+      });
+
+      room.status = 'finished';
+      room.finishedAt = new Date();
+      this.gameService.scheduleRoomCleanup(roomId);
+      
+      return 'Draw accepted';
+    } catch (e) {
+      return 'Error processing draw';
+    }
+  }
+
+  @SubscribeMessage('decline_draw')
+  handleDeclineDraw(client: AuthenticatedSocket, payload: { roomId: string }): string {
+    if (!client.user) return 'Unauthorized';
+    client.to(payload.roomId).emit('draw_declined', { declinedBy: client.user.id });
+    return 'Draw declined';
   }
 
   private handleError(client: Socket, error: any) {
@@ -393,7 +522,7 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
     const connectedIds = new Set<number>();
     
     for (const socket of sockets) {
-      const socketUserId = (socket.data as any).user?.id;
+      const socketUserId = (socket.data as GameSocketData).user?.id;
       if (socketUserId) connectedIds.add(socketUserId);
     }
     
@@ -406,5 +535,110 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
     if (room.blackId && connectedIds.has(room.blackId)) count++;
 
     return { count, connectedIds };
+  }
+
+  // ==================== Matchmaking System ====================
+
+  @SubscribeMessage('matchmaking_join')
+  async handleMatchmakingJoin(client: AuthenticatedSocket): Promise<string> {
+    if (!client.user) {
+      client.emit('error', { code: 'UNAUTHORIZED', message: 'Not authenticated' });
+      return 'Unauthorized';
+    }
+
+    const userId = client.user.id;
+    const username = client.user.username;
+
+    try {
+      // Join matchmaking queue
+      const result = await this.gameService.joinMatchmaking(userId, username);
+
+      console.log(`Matchmaking join result for ${username}:`, result);
+
+      // If immediately matched
+      if (result.matched && result.matchData) {
+        const { roomId, opponentId } = result.matchData;
+
+        // Emit match found to BOTH players
+        // Find opponent's socket
+        const allSockets = await this.server.fetchSockets();
+        const opponentSocket = allSockets.find(s => (s.data as GameSocketData).user?.id === opponentId);
+
+        // Emit to current user
+        client.emit('matchmaking_found', { roomId });
+        
+        // Emit to opponent
+        if (opponentSocket) {
+          opponentSocket.emit('matchmaking_found', { roomId });
+        }
+
+        console.log(`Match created: Room ${roomId} (${username} vs Opponent ${opponentId})`);
+      } else {
+        // Still searching - emit searching status
+        client.emit('matchmaking_searching', {
+          queuePosition: result.queuePosition,
+          estimatedWait: result.estimatedWait,
+        });
+
+        // Set interval to periodically update queue status (optional enhancement)
+        const updateInterval = setInterval(async () => {
+          // Check if user is still in queue
+          const stillInQueue = this.gameService.isInMatchmakingQueue(userId);
+          
+          if (!stillInQueue) {
+            clearInterval(updateInterval);
+            return;
+          }
+
+          // Try to match again
+          const queueInfo = this.gameService.getMatchmakingQueueInfo();
+          const playerInQueue = queueInfo.players.find(p => p.userId === userId);
+
+          if (playerInQueue) {
+            client.emit('matchmaking_searching', {
+              queuePosition: queueInfo.players.findIndex(p => p.userId === userId) + 1,
+              estimatedWait: Math.max(0, 60 - playerInQueue.waitTime),
+            });
+          }
+        }, 5000); // Update every 5 seconds
+
+        // Store interval ID to clean up later
+        client.data.matchmakingUpdateInterval = updateInterval;
+      }
+
+      return 'Joined matchmaking';
+    } catch (error) {
+      this.handleError(client, error);
+      return 'Error joining matchmaking';
+    }
+  }
+
+  @SubscribeMessage('matchmaking_leave')
+  handleMatchmakingLeave(client: AuthenticatedSocket): string {
+    if (!client.user) {
+      client.emit('error', { code: 'UNAUTHORIZED', message: 'Not authenticated' });
+      return 'Unauthorized';
+    }
+
+    const userId = client.user.id;
+
+    try {
+      // Clear update interval if exists
+      const updateInterval = client.data.matchmakingUpdateInterval;
+      if (updateInterval) {
+        clearInterval(updateInterval);
+        delete client.data.matchmakingUpdateInterval;
+      }
+
+      // Leave matchmaking queue
+      const result = this.gameService.leaveMatchmaking(userId);
+
+      console.log(`User ${client.user.username} left matchmaking:`, result);
+
+      return result.message;
+    } catch (error) {
+      this.handleError(client, error);
+      return 'Error leaving matchmaking';
+    }
   }
 }
