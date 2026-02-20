@@ -1,4 +1,4 @@
-import { Injectable, Inject, forwardRef } from '@nestjs/common';
+import { Injectable, Inject, forwardRef, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma } from '@prisma/client';
 import { GameException, GameErrorCode } from './game.exception';
@@ -34,7 +34,7 @@ interface MatchmakingPlayer {
 }
 
 @Injectable()
-export class GameService {
+export class GameService implements OnModuleInit, OnModuleDestroy {
   // Constants
   private readonly DEFAULT_RATING = 1200;
   private readonly ROOM_CLEANUP_TIMEOUT = 180; // 3 minutes
@@ -48,11 +48,52 @@ export class GameService {
   // Matchmaking queue (in-memory for MVP, can be moved to Redis later)
   private matchmakingQueue: MatchmakingPlayer[] = [];
   private matchmakingTimeouts = new Map<number, NodeJS.Timeout>();
+  private matchmakingInterval: NodeJS.Timeout;
 
   constructor(
     private prisma: PrismaService,
     @Inject(forwardRef(() => GameGateway)) private gameGateway: GameGateway,
   ) {}
+
+  onModuleInit() {
+    // Start background matchmaking loop
+    this.matchmakingInterval = setInterval(() => {
+      this.processMatchmakingQueue();
+    }, 5000); // Check every 5 seconds
+    console.log('Matchmaking background loop started');
+  }
+
+  onModuleDestroy() {
+    if (this.matchmakingInterval) {
+      clearInterval(this.matchmakingInterval);
+    }
+  }
+
+  /**
+   * Periodically check the queue for matches
+   * This allows the rating range to expand over time for waiting players
+   */
+  private async processMatchmakingQueue() {
+    if (this.matchmakingQueue.length < 2) return;
+
+    // Iterate through a snapshot of user IDs to avoid modification issues during iteration
+    const snapshotIds = this.matchmakingQueue.map(p => p.userId);
+
+    for (const userId of snapshotIds) {
+      // Check if user is still in queue (might have been matched in previous iteration of this loop)
+      if (!this.isInMatchmakingQueue(userId)) continue;
+
+      try {
+        const match = await this.tryToMatch(userId);
+        if (match) {
+          // Notify both players via Gateway
+          await this.gameGateway.notifyMatchFound(userId, match.opponentId, match.roomId);
+        }
+      } catch (error) {
+        console.error(`Error in matchmaking loop for user ${userId}:`, error);
+      }
+    }
+  }
 
   async createGame(data: Prisma.GameCreateInput) {
     return this.prisma.game.create({

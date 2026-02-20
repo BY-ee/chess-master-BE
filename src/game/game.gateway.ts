@@ -669,4 +669,22 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
       return 'Error leaving matchmaking';
     }
   }
+
+  /**
+   * Notify users that a match has been found
+   * Called by GameService when a background match occurs
+   */
+  async notifyMatchFound(userId1: number, userId2: number, roomId: string) {
+    const sockets = await this.server.fetchSockets();
+    
+    const notify = (userId: number) => {
+      const socket = sockets.find(s => (s.data as GameSocketData).user?.id === userId);
+      if (socket) {
+        socket.emit('matchmaking_found', { roomId });
+      }
+    };
+
+    notify(userId1);
+    notify(userId2);
+  }
 }
