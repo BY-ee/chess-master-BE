@@ -23,6 +23,7 @@ export interface Room {
   hostRating: number;
   hostCountry: string;
   guestRating?: number;
+  isEnding?: boolean; // Lock for game over processing
 }
 
 interface MatchmakingPlayer {

@@ -260,6 +260,14 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
       return 'Game not found';
     }
 
+    // Idempotency check: Is game already finishing?
+    if (room.status !== 'playing' || room.isEnding) {
+        return 'Game already finished or processing';
+    }
+
+    // Lock the room
+    room.isEnding = true;
+
     try {
       // Convert winnerColor to PGN standard result
       let result: string;
@@ -300,6 +308,8 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
       return 'Game saved and ended';
     } catch (error) {
       console.error('Error saving game:', error);
+      // Release lock on error so it can be retried (or handled manually)
+      room.isEnding = false;
       return 'Error saving game';
     }
   }
@@ -377,6 +387,14 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
     const room = this.gameService.getRoom(roomId);
     if (!room) return 'Room not found';
 
+    // Idempotency check
+    if (room.status !== 'playing' || room.isEnding) {
+        return 'Game already finished or processing';
+    }
+
+    // Lock the room
+    room.isEnding = true;
+
     // Determine opponent as winner
     let result: string;
     if (room.whiteId === client.user.id) {
@@ -409,6 +427,7 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
       return 'Resigned';
     } catch (error) {
        console.error(error);
+       room.isEnding = false; // Release lock
        return 'Error resigning';
     }
   }
@@ -427,6 +446,14 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
     const { roomId } = payload;
     const room = this.gameService.getRoom(roomId);
     if (!room) return 'Room not found';
+
+    // Idempotency check
+    if (room.status !== 'playing' || room.isEnding) {
+        return 'Game already finished or processing';
+    }
+
+    // Lock the room
+    room.isEnding = true;
 
     try {
       const result = '1/2-1/2';
@@ -450,6 +477,7 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
       
       return 'Draw accepted';
     } catch (e) {
+      room.isEnding = false; // Release lock
       return 'Error processing draw';
     }
   }
